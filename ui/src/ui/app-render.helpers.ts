@@ -8,6 +8,7 @@ import { OpenClawApp } from "./app.ts";
 import { ChatState, loadChatHistory } from "./controllers/chat.ts";
 import { icons } from "./icons.ts";
 import { iconForTab, pathForTab, titleForTab, type Tab } from "./navigation.ts";
+import { getOAuthChatSessionKey } from "./oauth-user.ts";
 import type { ThemeTransitionContext } from "./theme-transition.ts";
 import type { ThemeMode } from "./theme.ts";
 import type { SessionsListResult } from "./types.ts";
@@ -66,7 +67,7 @@ export function renderTab(state: AppViewState, tab: Tab) {
         }
         event.preventDefault();
         if (tab === "chat") {
-          const mainSessionKey = resolveSidebarChatSessionKey(state);
+          const mainSessionKey = getOAuthChatSessionKey() ?? resolveSidebarChatSessionKey(state);
           if (state.sessionKey !== mainSessionKey) {
             resetChatStateForSessionSwitch(state, mainSessionKey);
             void state.loadAssistantIdentity();
@@ -130,41 +131,48 @@ export function renderChatControls(state: AppViewState) {
   return html`
     <div class="chat-controls">
       <label class="field chat-controls__session">
-        <select
-          .value=${state.sessionKey}
-          ?disabled=${!state.connected}
-          @change=${(e: Event) => {
-            const next = (e.target as HTMLSelectElement).value;
-            state.sessionKey = next;
-            state.chatMessage = "";
-            state.chatStream = null;
-            (state as unknown as OpenClawApp).chatStreamStartedAt = null;
-            state.chatRunId = null;
-            (state as unknown as OpenClawApp).resetToolStream();
-            (state as unknown as OpenClawApp).resetChatScroll();
-            state.applySettings({
-              ...state.settings,
-              sessionKey: next,
-              lastActiveSessionKey: next,
-            });
-            void state.loadAssistantIdentity();
-            syncUrlWithSessionKey(
-              state as unknown as Parameters<typeof syncUrlWithSessionKey>[0],
-              next,
-              true,
-            );
-            void loadChatHistory(state as unknown as ChatState);
-          }}
-        >
-          ${repeat(
-            sessionOptions,
-            (entry) => entry.key,
-            (entry) =>
-              html`<option value=${entry.key} title=${entry.key}>
-                ${entry.displayName ?? entry.key}
-              </option>`,
-          )}
-        </select>
+        ${(() => {
+          const oauthSessionKey = getOAuthChatSessionKey();
+          if (oauthSessionKey) {
+            // OAuth mode: show locked session key as read-only text, no select
+            return html`<span class="chat-controls__session-key">${oauthSessionKey}</span>`;
+          }
+          return html`<select
+            .value=${state.sessionKey}
+            ?disabled=${!state.connected}
+            @change=${(e: Event) => {
+              const next = (e.target as HTMLSelectElement).value;
+              state.sessionKey = next;
+              state.chatMessage = "";
+              state.chatStream = null;
+              (state as unknown as OpenClawApp).chatStreamStartedAt = null;
+              state.chatRunId = null;
+              (state as unknown as OpenClawApp).resetToolStream();
+              (state as unknown as OpenClawApp).resetChatScroll();
+              state.applySettings({
+                ...state.settings,
+                sessionKey: next,
+                lastActiveSessionKey: next,
+              });
+              void state.loadAssistantIdentity();
+              syncUrlWithSessionKey(
+                state as unknown as Parameters<typeof syncUrlWithSessionKey>[0],
+                next,
+                true,
+              );
+              void loadChatHistory(state as unknown as ChatState);
+            }}
+          >
+            ${repeat(
+              sessionOptions,
+              (entry) => entry.key,
+              (entry) =>
+                html`<option value=${entry.key} title=${entry.key}>
+                  ${entry.displayName ?? entry.key}
+                </option>`,
+            )}
+          </select>`;
+        })()}
       </label>
       <button
         class="btn btn--sm btn--icon"

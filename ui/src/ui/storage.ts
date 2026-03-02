@@ -1,6 +1,7 @@
 const KEY = "openclaw.control.settings.v1";
 
 import { isSupportedLocale } from "../i18n/index.ts";
+import { getOAuthChatSessionKey } from "./oauth-user.ts";
 import type { ThemeMode } from "./theme.ts";
 
 export type UiSettings = {
@@ -38,11 +39,17 @@ export function loadSettings(): UiSettings {
 
   try {
     const raw = localStorage.getItem(KEY);
+    // If OAuth user is present, override session keys with the locked value
+    const oauthSessionKey = getOAuthChatSessionKey();
     if (!raw) {
+      if (oauthSessionKey) {
+        defaults.sessionKey = oauthSessionKey;
+        defaults.lastActiveSessionKey = oauthSessionKey;
+      }
       return defaults;
     }
     const parsed = JSON.parse(raw) as Partial<UiSettings>;
-    return {
+    const result: UiSettings = {
       gatewayUrl:
         typeof parsed.gatewayUrl === "string" && parsed.gatewayUrl.trim()
           ? parsed.gatewayUrl.trim()
@@ -81,6 +88,12 @@ export function loadSettings(): UiSettings {
           : defaults.navGroupsCollapsed,
       locale: isSupportedLocale(parsed.locale) ? parsed.locale : undefined,
     };
+    // OAuth user overrides session keys with the locked value
+    if (oauthSessionKey) {
+      result.sessionKey = oauthSessionKey;
+      result.lastActiveSessionKey = oauthSessionKey;
+    }
+    return result;
   } catch {
     return defaults;
   }

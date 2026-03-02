@@ -4,6 +4,7 @@ import { t, i18n, type Locale } from "../../i18n/index.ts";
 import { buildExternalLinkRel, EXTERNAL_LINK_TARGET } from "../external-link.ts";
 import { formatRelativeTimestamp, formatDurationHuman } from "../format.ts";
 import type { GatewayHelloOk } from "../gateway.ts";
+import { getOAuthUserId } from "../oauth-user.ts";
 import { formatNextRun } from "../presenter.ts";
 import type { UiSettings } from "../storage.ts";
 import { shouldShowPairingHint } from "./overview-hints.ts";
@@ -241,13 +242,23 @@ export function renderOverview(props: OverviewProps) {
           }
           <label class="field">
             <span>${t("overview.access.sessionKey")}</span>
-            <input
-              .value=${props.settings.sessionKey}
-              @input=${(e: Event) => {
-                const v = (e.target as HTMLInputElement).value;
-                props.onSessionKeyChange(v);
-              }}
-            />
+            ${(() => {
+              const userId = getOAuthUserId();
+              if (userId) {
+                // OAuth mode: show locked session key (base:userId), not editable
+                const lockedKey = props.settings.sessionKey.endsWith(`:${userId}`)
+                  ? props.settings.sessionKey
+                  : `${props.settings.sessionKey}:${userId}`;
+                return html`<input .value=${lockedKey} readonly />`;
+              }
+              return html`<input
+                .value=${props.settings.sessionKey}
+                @input=${(e: Event) => {
+                  const v = (e.target as HTMLInputElement).value;
+                  props.onSessionKeyChange(v);
+                }}
+              />`;
+            })()}
           </label>
           <label class="field">
             <span>${t("overview.access.language")}</span>
