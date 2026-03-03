@@ -57,7 +57,7 @@ import {
 } from "./hooks.js";
 import { sendGatewayAuthFailure, setDefaultSecurityHeaders } from "./http-common.js";
 import { getBearerToken } from "./http-utils.js";
-import { enforceOAuthSession, handleOAuthCallbackRequest } from "./oauth-http.js";
+import { enforceOAuthSession, handleLoginPageRequest, handleLoginRequest } from "./oauth-http.js";
 import { handleOpenAiHttpRequest } from "./openai-http.js";
 import { handleOpenResponsesHttpRequest } from "./openresponses-http.js";
 import { GATEWAY_CLIENT_MODES, normalizeGatewayClientMode } from "./protocol/client-info.js";
@@ -515,11 +515,14 @@ export function createGatewayHttpServer(opts: {
       if (await handleHooksRequest(req, res)) {
         return;
       }
-      // OAuth callback must be handled before the session gate.
-      if (await handleOAuthCallbackRequest(req, res)) {
+      // Login page and login API must be handled before the session gate.
+      if (handleLoginPageRequest(req, res)) {
         return;
       }
-      // Redirect unauthenticated browser requests to IAM login when OAuth is configured.
+      if (await handleLoginRequest(req, res)) {
+        return;
+      }
+      // Redirect unauthenticated browser requests to the login page when OAuth is configured.
       if (enforceOAuthSession(req, res)) {
         return;
       }
