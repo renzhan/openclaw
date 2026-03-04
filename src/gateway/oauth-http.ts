@@ -8,7 +8,7 @@ const LOGIN_PATH = "/api/v1/auth/login";
 const LOGIN_PAGE_PATH = "/login";
 
 // Paths that never require an OAuth session
-const EXEMPT_PREFIXES = [LOGIN_PATH, LOGIN_PAGE_PATH, "/assets/", "/favicon", "/_"];
+const EXEMPT_PREFIXES = [LOGIN_PATH, LOGIN_PAGE_PATH, "/assets/", "/favicon", "/_", "/wecom/"];
 
 // ── Session gate ──────────────────────────────────────────────────────────────
 
