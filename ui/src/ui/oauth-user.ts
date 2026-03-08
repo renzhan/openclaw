@@ -29,11 +29,11 @@ export function getOAuthUserId(): string | null {
   return getOAuthUser()?.user_id ?? null;
 }
 
-/** Returns the locked session key: <username>:<user_id>, or null if no OAuth user. */
+/** Returns the locked session key: agent:<username>-<user_id>:main, or null if no OAuth user. */
 export function getOAuthChatSessionKey(): string | null {
   const user = getOAuthUser();
   if (!user?.user_id) return null;
   const username = user.username?.trim();
   if (!username) return null;
-  return `${username}-${user.user_id}`;
+  return `agent:${username}-${user.user_id}:main`;
 }
