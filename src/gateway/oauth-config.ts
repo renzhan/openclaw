@@ -9,6 +9,10 @@ export type OAuthConfig = {
   JWT_VERIFY_SIGNATURE: boolean;
   JWT_VERIFY_EXP: boolean;
   REQUEST_TIMEOUT: number;
+  /** Bearer token for OpenClaw CLI gateway API (OPENCLAW_CLI_API_TOKEN) */
+  CLI_API_TOKEN: string;
+  /** Base URL for OpenClaw CLI gateway API */
+  CLI_API_HOST: string;
 };
 
 export function resolveOAuthConfig(): OAuthConfig | null {
@@ -32,5 +36,7 @@ export function resolveOAuthConfig(): OAuthConfig | null {
     JWT_VERIFY_SIGNATURE: process.env.OAUTH_VERIFY_SIGNATURE !== "false",
     JWT_VERIFY_EXP: process.env.OAUTH_VERIFY_EXP !== "false",
     REQUEST_TIMEOUT: Number(process.env.OAUTH_REQUEST_TIMEOUT_MS ?? "10000"),
+    CLI_API_TOKEN: process.env.OPENCLAW_CLI_API_TOKEN ?? "Token",
+    CLI_API_HOST: process.env.OPENCLAW_CLI_API_HOST ?? "http://localhost:18790",
   };
 }

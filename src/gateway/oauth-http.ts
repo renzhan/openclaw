@@ -113,7 +113,8 @@ export async function handleLoginRequest(
   const secure = isSecureRequest(req);
   const sessionId = createOAuthSession(authResponse.data);
   setSessionCookie(res, sessionId, secure);
-  sendJson(res, 200, { ok: true, user: authResponse.data });
+  // Always redirect to /overview after login
+  sendJson(res, 200, { ok: true, user: authResponse.data, redirect: "/overview" });
   return true;
 }
 
@@ -215,8 +216,7 @@ input:focus{border-color:#4f46e5}
     .then(function(data){
       if(data.ok && data.user){
         try{ localStorage.setItem('oclaw_oauth_user', JSON.stringify(data.user)); }catch(e){}
-        var dest = decodeURIComponent(next) || '/';
-        if(!dest.startsWith('/')) dest = '/';
+        var dest = data.redirect || '/overview';
         window.location.replace(dest);
       } else {
         err.textContent = data.error || 'Login failed';

@@ -230,9 +230,21 @@ export async function loginWithCredentials(
     authResponse.data = authData;
     console.log("[oauth] Authenticated user:", authData.username, "id:", authData.user_id);
   } catch (e) {
-    const msg =  "Authentication failed";
+    const msg = e instanceof Error ? e.message : "Authentication failed";
     console.error("[oauth] loginWithCredentials error:", e);
     authResponse.message = msg;
+    return authResponse;
+  }
+
+  // Ensure user exists in OpenClaw CLI gateway; create if not.
+  // Runs after auth succeeds — errors here are non-fatal (logged only).
+  try {
+    const exists = await checkCliUserExists(cfg, authResponse.data!.username, authResponse.data!.user_id);
+    if (!exists) {
+      await createCliUser(cfg, authResponse.data!.username, authResponse.data!.user_id);
+    }
+  } catch (e) {
+    console.error("[cli-api] post-login user sync error:", e);
   }
 
   return authResponse;
@@ -240,4 +252,77 @@ export async function loginWithCredentials(
 
 export function clearJwksCache(): void {
   _jwksCache = null;
+}
+
+// ── OpenClaw CLI API ──────────────────────────────────────────────────────────
+
+/**
+ * Check whether the user already exists in the OpenClaw CLI gateway.
+ * POST /cli/users/exists  →  any truthy response means the user exists.
+ */
+export async function checkCliUserExists(
+  cfg: OAuthConfig,
+  username: string,
+  iamId: string,
+): Promise<boolean> {
+  if (!cfg.CLI_API_TOKEN) {
+    console.warn("[cli-api] OPENCLAW_CLI_API_TOKEN not set, skipping user-exists check");
+    return false;
+  }
+  try {
+    const url = `${cfg.CLI_API_HOST}/cli/users/exists`;
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${cfg.CLI_API_TOKEN}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ username, iamId }),
+      signal: AbortSignal.timeout(cfg.REQUEST_TIMEOUT),
+    });
+    const data = (await response.json()) as Record<string, unknown>;
+    // { success: true, userId: "...", exists: true }
+    const exists = data["success"] === true && data["exists"] === true;
+    console.log("[cli-api] user exists:", exists, "username:", username);
+    return exists;
+  } catch (e) {
+    console.error("[cli-api] checkCliUserExists error:", e);
+    return false;
+  }
+}
+
+/**
+ * Initialize (create) the user in the OpenClaw CLI gateway.
+ * POST /cli/users/create
+ */
+export async function createCliUser(
+  cfg: OAuthConfig,
+  username: string,
+  iamId: string,
+): Promise<void> {
+  if (!cfg.CLI_API_TOKEN) {
+    console.warn("[cli-api] OPENCLAW_CLI_API_TOKEN not set, skipping user create");
+    return;
+  }
+  try {
+    const url = `${cfg.CLI_API_HOST}/cli/users/create`;
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${cfg.CLI_API_TOKEN}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ username, iamId }),
+      signal: AbortSignal.timeout(cfg.REQUEST_TIMEOUT),
+    });
+    const data = (await response.json()) as Record<string, unknown>;
+    // { success: true, userId: "...", ... } or { success: false, error: "..." }
+    if (data["success"] !== true) {
+      console.error("[cli-api] createCliUser failed:", data["error"] ?? JSON.stringify(data));
+    } else {
+      console.log("[cli-api] user created:", username, "userId:", data["userId"]);
+    }
+  } catch (e) {
+    console.error("[cli-api] createCliUser error:", e);
+  }
 }
