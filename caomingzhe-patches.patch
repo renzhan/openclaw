@@ -1,0 +1,2230 @@
+From 077678b38ec5810a8ea2fcadd71b951c28680065 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=E6=9B=B9=E9=93=AD=E5=93=B2?= <mingzhe.cao@unisco.com>
+Date: Mon, 2 Mar 2026 16:24:05 +0800
+Subject: [PATCH 1/7] UP
+
+---
+ package.json                 |   2 +
+ scripts/bundle-a2ui.ps1      |  32 ++++
+ src/gateway/oauth-config.ts  |  62 ++++++++
+ src/gateway/oauth-http.ts    | 236 +++++++++++++++++++++++++++++
+ src/gateway/oauth-service.ts | 286 +++++++++++++++++++++++++++++++++++
+ src/gateway/oauth-session.ts |  63 ++++++++
+ src/gateway/server-http.ts   |   9 ++
+ 7 files changed, 690 insertions(+)
+ create mode 100644 scripts/bundle-a2ui.ps1
+ create mode 100644 src/gateway/oauth-config.ts
+ create mode 100644 src/gateway/oauth-http.ts
+ create mode 100644 src/gateway/oauth-service.ts
+ create mode 100644 src/gateway/oauth-session.ts
+
+diff --git a/package.json b/package.json
+index 18760b29b..9dd1fb8cc 100644
+--- a/package.json
++++ b/package.json
+@@ -52,8 +52,10 @@
+     "android:run": "cd apps/android && ./gradlew :app:installDebug && adb shell am start -n ai.openclaw.android/.MainActivity",
+     "android:test": "cd apps/android && ./gradlew :app:testDebugUnitTest",
+     "build": "pnpm canvas:a2ui:bundle && tsdown && pnpm build:plugin-sdk:dts && node --import tsx scripts/write-plugin-sdk-entry-dts.ts && node --import tsx scripts/canvas-a2ui-copy.ts && node --import tsx scripts/copy-hook-metadata.ts && node --import tsx scripts/copy-export-html-templates.ts && node --import tsx scripts/write-build-info.ts && node --import tsx scripts/write-cli-compat.ts",
++    "build:win": "pnpm canvas:a2ui:bundle:win && tsdown && pnpm build:plugin-sdk:dts && node --import tsx scripts/write-plugin-sdk-entry-dts.ts && node --import tsx scripts/canvas-a2ui-copy.ts && node --import tsx scripts/copy-hook-metadata.ts && node --import tsx scripts/copy-export-html-templates.ts && node --import tsx scripts/write-build-info.ts && node --import tsx scripts/write-cli-compat.ts",
+     "build:plugin-sdk:dts": "tsc -p tsconfig.plugin-sdk.dts.json",
+     "canvas:a2ui:bundle": "bash scripts/bundle-a2ui.sh",
++    "canvas:a2ui:bundle:win": "powershell -ExecutionPolicy Bypass -File scripts/bundle-a2ui.ps1",
+     "check": "pnpm format:check && pnpm tsgo && pnpm lint && pnpm lint:tmp:no-random-messaging && pnpm lint:tmp:channel-agnostic-boundaries && pnpm lint:tmp:no-raw-channel-fetch && pnpm lint:auth:no-pairing-store-group && pnpm lint:auth:pairing-account-scope && pnpm check:host-env-policy:swift",
+     "check:docs": "pnpm format:docs:check && pnpm lint:docs && pnpm docs:check-links",
+     "check:host-env-policy:swift": "node scripts/generate-host-env-security-policy-swift.mjs --check",
+diff --git a/scripts/bundle-a2ui.ps1 b/scripts/bundle-a2ui.ps1
+new file mode 100644
+index 000000000..ed8f171aa
+--- /dev/null
++++ b/scripts/bundle-a2ui.ps1
+@@ -0,0 +1,32 @@
++# PowerShell version of bundle-a2ui.sh for Windows
++$ErrorActionPreference = "Stop"
++
++Write-Host "A2UI bundle check (Windows mode)..."
++
++$ROOT_DIR = Split-Path -Parent $PSScriptRoot
++$HASH_FILE = Join-Path $ROOT_DIR "src\canvas-host\a2ui\.bundle.hash"
++$OUTPUT_FILE = Join-Path $ROOT_DIR "src\canvas-host\a2ui\a2ui.bundle.js"
++
++# Check if bundle already exists
++if (Test-Path $OUTPUT_FILE) {
++    Write-Host "A2UI bundle exists; skipping."
++    exit 0
++}
++
++# Create placeholder bundle
++Write-Host "Creating placeholder A2UI bundle for Windows..."
++$bundleDir = Split-Path $OUTPUT_FILE -Parent
++if (-not (Test-Path $bundleDir)) {
++    New-Item -ItemType Directory -Force -Path $bundleDir | Out-Null
++}
++
++@"
++// Placeholder bundle for Windows development
++// This file is auto-generated. Do not edit manually.
++export default {};
++"@ | Out-File -FilePath $OUTPUT_FILE -Encoding utf8
++
++"placeholder-windows-dev" | Out-File -FilePath $HASH_FILE -Encoding utf8 -NoNewline
++
++Write-Host "A2UI placeholder bundle created successfully."
++exit 0
+diff --git a/src/gateway/oauth-config.ts b/src/gateway/oauth-config.ts
+new file mode 100644
+index 000000000..b47648a77
+--- /dev/null
++++ b/src/gateway/oauth-config.ts
+@@ -0,0 +1,62 @@
++export type OAuthConfig = {
++  IAM_HOST: string;
++  TOKEN_URL: string;
++  JWKS_URL: string;
++  AUTHORIZE_URL: string;
++  /** Value passed as Authorization header to token endpoint */
++  AUTHORIZATION: string;
++  CLIENT_ID: string;
++  AUTHORIZATION_GRANT_TYPE: string;
++  JWT_ALGORITHM: string;
++  JWT_VERIFY_SIGNATURE: boolean;
++  JWT_VERIFY_EXP: boolean;
++  JWT_VERIFY_AUD: boolean;
++  JWT_VERIFY_ISS: boolean;
++  REQUEST_TIMEOUT: number;
++  /** Origin-only redirect_uri registered with IAM, e.g. "http://localhost:18789" */
++  REDIRECT_URI: string;
++};
++
++export function resolveOAuthConfig(): OAuthConfig | null {
++  const IAM_HOST = process.env.OAUTH_IAM_HOST ?? "https://id-staging.item.com";
++  const CLIENT_ID = process.env.OAUTH_CLIENT_ID ?? "stag-SAIL000000-ojja7lspTp";
++  if (!IAM_HOST || !CLIENT_ID) return null;
++
++  const CLIENT_SECRET = process.env.OAUTH_CLIENT_SECRET ?? "7c1f62cc-2d5a-487b-a1f7-a3dc0fb8bd28";
++  // Build Basic auth header from clientId:clientSecret (matches Python AUTHORIZATION setting)
++  const AUTHORIZATION =
++    process.env.OAUTH_AUTHORIZATION ??
++    `Basic ${Buffer.from(`${CLIENT_ID}:${CLIENT_SECRET}`).toString("base64")}`;
++
++  return {
++    IAM_HOST,
++    CLIENT_ID,
++    AUTHORIZATION,
++    TOKEN_URL: process.env.OAUTH_TOKEN_URL ?? "/oauth2/token",
++    JWKS_URL: process.env.OAUTH_JWKS_URL ?? "/oauth2/jwks",
++    AUTHORIZE_URL: process.env.OAUTH_AUTHORIZE_URL ?? "/oauth2/authorize",
++    AUTHORIZATION_GRANT_TYPE: process.env.OAUTH_GRANT_TYPE ?? "authorization_code",
++    JWT_ALGORITHM: process.env.OAUTH_JWT_ALGORITHM ?? "RS256",
++    JWT_VERIFY_SIGNATURE: process.env.OAUTH_VERIFY_SIGNATURE !== "false",
++    JWT_VERIFY_EXP: process.env.OAUTH_VERIFY_EXP !== "false",
++    JWT_VERIFY_AUD: process.env.OAUTH_VERIFY_AUD === "true",
++    JWT_VERIFY_ISS: process.env.OAUTH_VERIFY_ISS === "true",
++    REQUEST_TIMEOUT: Number(process.env.OAUTH_REQUEST_TIMEOUT_MS ?? "10000"),
++    REDIRECT_URI: process.env.OAUTH_REDIRECT_URI ?? "",
++  };
++}
++
++export function buildAuthorizeUrl(cfg: OAuthConfig, redirectUri: string, state: string): string {
++  const url = new URL(`${cfg.IAM_HOST}${cfg.AUTHORIZE_URL}`);
++  url.searchParams.set("response_type", "code");
++  url.searchParams.set("client_id", cfg.CLIENT_ID);
++  url.searchParams.set("redirect_uri", redirectUri);
++  url.searchParams.set("state", state);
++  return url.toString();
++}
++
++/** Returns full callback URL: e.g. http://localhost:18789/api/v1/auth/callback */
++export function resolveRedirectUri(cfg: OAuthConfig, host: string, secure: boolean): string {
++  if (cfg.REDIRECT_URI) return cfg.REDIRECT_URI;
++  return `${secure ? "https" : "http"}://${host}/api/v1/auth/callback`;
++}
+diff --git a/src/gateway/oauth-http.ts b/src/gateway/oauth-http.ts
+new file mode 100644
+index 000000000..3fe1d51b3
+--- /dev/null
++++ b/src/gateway/oauth-http.ts
+@@ -0,0 +1,236 @@
++import type { IncomingMessage, ServerResponse } from "node:http";
++import { buildAuthorizeUrl, resolveOAuthConfig, resolveRedirectUri } from "./oauth-config.js";
++import { getAuthorizationToken } from "./oauth-service.js";
++import { createOAuthSession, resolveOAuthSession, setSessionCookie } from "./oauth-session.js";
++import { sendJson, sendMethodNotAllowed } from "./http-common.js";
++
++const CALLBACK_PATH = "/api/v1/auth/callback";
++
++// Paths exempt from the OAuth session gate — callback MUST be here
++const EXEMPT_PREFIXES = [CALLBACK_PATH, "/assets/", "/favicon", "/_"];
++
++/**
++ * Gate: redirect unauthenticated browser requests to IAM login.
++ * Returns true if the request was handled (redirect or 401 sent).
++ */
++export function enforceOAuthSession(req: IncomingMessage, res: ServerResponse): boolean {
++  const cfg = resolveOAuthConfig();
++  if (!cfg) return false;
++
++  const url = new URL(req.url ?? "/", "http://localhost");
++  const pathname = url.pathname;
++
++  // Callback and static assets are always exempt — never redirect these
++  if (EXEMPT_PREFIXES.some((p) => pathname === p || pathname.startsWith(p))) {
++    return false;
++  }
++
++  const user = resolveOAuthSession(req);
++  if (user) return false;
++
++  const isBrowser = req.method === "GET" || req.method === "HEAD";
++  if (!isBrowser) {
++    sendJson(res, 401, { ok: false, error: "Unauthorized" });
++    return true;
++  }
++
++  const host = req.headers.host ?? "localhost";
++  const secure = isSecureRequest(req);
++  const redirectUri = resolveRedirectUri(cfg, host, secure);
++
++  // Only store pathname as state — never include query string to avoid
++  // encoding ?code=...&state=... from a previous failed callback
++  const state = encodeURIComponent(url.pathname);
++  const iamUrl = buildAuthorizeUrl(cfg, redirectUri, state);
++
++  res.statusCode = 302;
++  res.setHeader("Location", iamUrl);
++  res.setHeader("Cache-Control", "no-store");
++  res.end();
++  return true;
++}
++
++/**
++ * Handle GET /api/v1/auth/callback?code=...&state=...
++ *
++ * Calls get_authorization_token (mirrors Python OAuthService.get_authorization_token),
++ * creates a session cookie, then redirects back to the original page.
++ *
++ * Also handles POST for programmatic use: { code, redirect_uri? } → { ok, user }
++ */
++export async function handleOAuthCallbackRequest(
++  req: IncomingMessage,
++  res: ServerResponse,
++): Promise<boolean> {
++  const url = new URL(req.url ?? "/", "http://localhost");
++  if (url.pathname !== CALLBACK_PATH) return false;
++
++  if (req.method !== "GET" && req.method !== "POST") {
++    sendMethodNotAllowed(res, "GET, POST");
++    return true;
++  }
++
++  const cfg = resolveOAuthConfig();
++  if (!cfg) {
++    sendJson(res, 503, { ok: false, error: "OAuth not configured" });
++    return true;
++  }
++
++  const host = req.headers.host ?? "localhost";
++  const secure = isSecureRequest(req);
++  const redirectUri = resolveRedirectUri(cfg, host, secure);
++
++  if (req.method === "GET") {
++    const code = url.searchParams.get("code");
++    const state = url.searchParams.get("state");
++
++    if (!code) {
++      res.statusCode = 400;
++      res.setHeader("Content-Type", "text/plain; charset=utf-8");
++      res.end("Missing authorization code");
++      return true;
++    }
++
++    // Mirrors Python: get_authorization_token(code, redirect_uri)
++    const authResponse = await getAuthorizationToken(cfg, code, redirectUri);
++
++    if (!authResponse.success || !authResponse.data) {
++      // Show error page — do NOT redirect back to IAM (would cause infinite loop)
++      res.statusCode = 200;
++      res.setHeader("Content-Type", "text/html; charset=utf-8");
++      res.setHeader("Cache-Control", "no-store");
++      res.end(buildErrorPage(authResponse.message));
++      return true;
++    }
++
++    const sessionId = createOAuthSession(authResponse.data);
++    setSessionCookie(res, sessionId, secure);
++
++    // Write user data to localStorage via an intermediate HTML page, then redirect
++    const returnTo = safeReturnTo(decodeState(state ?? ""));
++    res.statusCode = 200;
++    res.setHeader("Content-Type", "text/html; charset=utf-8");
++    res.setHeader("Cache-Control", "no-store");
++    res.end(buildLoginSuccessPage(authResponse.data, returnTo));
++    return true;
++  }
++
++  // POST — programmatic
++  const body = await readJsonBody(req);
++  if (!body.ok) {
++    sendJson(res, 400, { ok: false, error: body.error });
++    return true;
++  }
++
++  const data = body.value as Record<string, unknown>;
++  const code = typeof data["code"] === "string" ? data["code"] : null;
++  const overrideRedirectUri =
++    typeof data["redirect_uri"] === "string" ? data["redirect_uri"] : redirectUri;
++
++  if (!code) {
++    sendJson(res, 400, { ok: false, error: "Missing required parameter: code" });
++    return true;
++  }
++
++  const authResponse = await getAuthorizationToken(cfg, code, overrideRedirectUri);
++  if (!authResponse.success || !authResponse.data) {
++    sendJson(res, 401, { ok: false, error: authResponse.message });
++    return true;
++  }
++
++  const sessionId = createOAuthSession(authResponse.data);
++  setSessionCookie(res, sessionId, secure);
++  sendJson(res, 200, { ok: true, user: authResponse.data });
++  return true;
++}
++
++// ── Helpers ───────────────────────────────────────────────────────────────────
++
++function isSecureRequest(req: IncomingMessage): boolean {
++  const proto = req.headers["x-forwarded-proto"];
++  if (typeof proto === "string") return proto.toLowerCase() === "https";
++  return (req.socket as { encrypted?: boolean }).encrypted === true;
++}
++
++function safeReturnTo(raw: string): string {
++  if (!raw || raw.startsWith("//") || /^https?:\/\//i.test(raw)) return "/";
++  return raw.startsWith("/") ? raw : "/";
++}
++
++function decodeState(state: string): string {
++  try {
++    const once = decodeURIComponent(state);
++    if (/%[0-9a-fA-F]{2}/.test(once)) {
++      try { return decodeURIComponent(once); } catch { return once; }
++    }
++    return once;
++  } catch {
++    return "/";
++  }
++}
++
++async function readJsonBody(
++  req: IncomingMessage,
++): Promise<{ ok: true; value: unknown } | { ok: false; error: string }> {
++  return new Promise((resolve) => {
++    const chunks: Buffer[] = [];
++    let size = 0;
++    req.on("data", (chunk: Buffer) => {
++      size += chunk.length;
++      if (size > 65536) { resolve({ ok: false, error: "Body too large" }); req.destroy(); }
++      else chunks.push(chunk);
++    });
++    req.on("end", () => {
++      try {
++        const raw = Buffer.concat(chunks).toString("utf8");
++        resolve({ ok: true, value: raw ? (JSON.parse(raw) as unknown) : {} });
++      } catch { resolve({ ok: false, error: "Invalid JSON" }); }
++    });
++    req.on("error", () => resolve({ ok: false, error: "Read error" }));
++  });
++}
++
++function buildErrorPage(message: string): string {
++  const escaped = message.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
++  return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
++<title>Login Failed</title>
++<style>body{font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#f5f5f5}
++.box{background:#fff;padding:2rem 3rem;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,.1);text-align:center;max-width:400px}
++h2{color:#d32f2f;margin-top:0}p{color:#555}a{color:#1976d2;text-decoration:none;font-weight:bold}</style>
++</head><body><div class="box">
++<h2>Login Failed</h2>
++<p>${escaped}</p>
++<p><a href="/">Try again</a></p>
++</div></body></html>`;
++}
++
++function buildLoginSuccessPage(
++  user: import("./oauth-service.js").AuthenticationData,
++  returnTo: string,
++): string {
++  const payload = JSON.stringify({
++    user_id: user.user_id,
++    username: user.username,
++    name: user.name ?? null,
++    email: user.email ?? null,
++    phone: user.phone ?? null,
++    tenant_id: user.tenant_id,
++    tenant_name: user.tenant_name ?? null,
++    roles: user.roles,
++    exp: user.exp,
++    access_token: user.access_token,
++  });
++  // Escape for safe embedding inside a JS template literal
++  const safePayload = payload
++    .replace(/\\/g, "\\\\")
++    .replace(/`/g, "\\`")
++    .replace(/<\/script>/gi, "<\\/script>");
++  const safeReturn = returnTo.replace(/'/g, "\\'");
++  return [
++    "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>Logging in...</title></head>",
++    "<body><script>",
++    "try{localStorage.setItem('oclaw_oauth_user',`" + safePayload + "`);}catch(e){console.warn('localStorage write failed:',e);}",
++    "window.location.replace('" + safeReturn + "');",
++    "</script></body></html>",
++  ].join("\n");
++}
+diff --git a/src/gateway/oauth-service.ts b/src/gateway/oauth-service.ts
+new file mode 100644
+index 000000000..606dc4043
+--- /dev/null
++++ b/src/gateway/oauth-service.ts
+@@ -0,0 +1,286 @@
++import { createPublicKey, createVerify } from "node:crypto";
++import type { OAuthConfig } from "./oauth-config.js";
++
++// ── Types (mirrors Python schemas) ───────────────────────────────────────────
++
++export type TokenResponse = {
++  success: boolean;
++  access_token: string;
++  token_type: string;
++  expires_in: number;
++  refresh_token: string;
++  scope: string;
++};
++
++export type AuthenticationData = {
++  user_id: string;
++  username: string;
++  name?: string;
++  email?: string;
++  phone?: string;
++  tenant_id: string;
++  tenant_name?: string;
++  roles: string[];
++  exp: number;
++  access_token: string;
++};
++
++export type AuthResponse = {
++  success: boolean;
++  code: number;
++  message: string;
++  data: AuthenticationData | null;
++};
++
++function emptyAuthResponse(): AuthResponse {
++  return { success: false, code: 0, message: "", data: null };
++}
++
++// ── JWKS cache (mirrors Python self._jwks_cache) ──────────────────────────────
++
++let _jwksCache: Record<string, unknown> | null = null;
++
++// ── OAuthService methods (mirrors Python class) ───────────────────────────────
++
++/**
++ * _exchange_token_by_code: exchange authorization code for token.
++ * Mirrors Python OAuthService._exchange_token_by_code exactly.
++ */
++async function exchangeTokenByCode(
++  cfg: OAuthConfig,
++  code: string,
++  redirectUri?: string,
++): Promise<TokenResponse> {
++  const tokenResponse: TokenResponse = {
++    success: false,
++    access_token: "",
++    token_type: "",
++    expires_in: 0,
++    refresh_token: "",
++    scope: "",
++  };
++
++  try {
++    const url = `${cfg.IAM_HOST}${cfg.TOKEN_URL}`;
++    const formData = new URLSearchParams({
++      grant_type: cfg.AUTHORIZATION_GRANT_TYPE,
++      code,
++    });
++    if (redirectUri) {
++      formData.set("redirect_uri", redirectUri);
++    }
++
++    console.log("[oauth] _exchange_token_by_code →", url, "redirect_uri:", redirectUri ?? "(none)");
++
++    const response = await fetch(url, {
++      method: "POST",
++      headers: {
++        Authorization: cfg.AUTHORIZATION,
++        "Content-Type": "application/x-www-form-urlencoded",
++      },
++      body: formData.toString(),
++      signal: AbortSignal.timeout(cfg.REQUEST_TIMEOUT),
++    });
++
++    if (response.status === 200) {
++      const data = (await response.json()) as Record<string, unknown>;
++      tokenResponse.success = true;
++      tokenResponse.access_token = String(data["access_token"] ?? "");
++      tokenResponse.token_type = String(data["token_type"] ?? "");
++      tokenResponse.expires_in = Number(data["expires_in"] ?? 0);
++      tokenResponse.refresh_token = String(data["refresh_token"] ?? "");
++      tokenResponse.scope = String(data["scope"] ?? "");
++      console.log("[oauth] Token exchanged successfully");
++    } else {
++      const body = await response.text().catch(() => "");
++      console.error("[oauth] Token exchange failed:", response.status, body);
++    }
++  } catch (e) {
++    console.error("[oauth] Exchange token error:", e);
++  }
++
++  return tokenResponse;
++}
++
++/**
++ * _get_jwks: fetch JWKS with cache.
++ * Mirrors Python OAuthService._get_jwks exactly.
++ */
++async function getJwks(cfg: OAuthConfig): Promise<Record<string, unknown> | null> {
++  if (_jwksCache) return _jwksCache;
++
++  try {
++    const url = `${cfg.IAM_HOST}${cfg.JWKS_URL}`;
++    const response = await fetch(url, {
++      signal: AbortSignal.timeout(cfg.REQUEST_TIMEOUT),
++    });
++
++    if (response.status === 200) {
++      _jwksCache = (await response.json()) as Record<string, unknown>;
++      console.log("[oauth] JWKS fetched successfully");
++      return _jwksCache;
++    } else {
++      console.error("[oauth] Failed to fetch JWKS:", response.status);
++    }
++  } catch (e) {
++    console.error("[oauth] Get JWKS error:", e);
++  }
++
++  return null;
++}
++
++/**
++ * _jwk_to_pem: convert JWK to PEM public key.
++ * Mirrors Python OAuthService._jwk_to_pem using Node built-in crypto.
++ */
++function jwkToPem(jwk: Record<string, string>): string {
++  // Node's createPublicKey accepts JWK directly — equivalent to Python's
++  // RSAPublicNumbers(e, n).public_key().public_bytes(PEM, SubjectPublicKeyInfo)
++  const pubKey = createPublicKey({
++    key: { kty: "RSA", e: jwk["e"], n: jwk["n"] },
++    format: "jwk",
++  });
++  return pubKey.export({ type: "spki", format: "pem" }) as string;
++}
++
++/**
++ * Minimal RS256 JWT verify — mirrors Python jwt.decode() with options dict.
++ * Supports verify_signature, verify_exp (verify_aud/verify_iss always false here).
++ */
++function decodeAndVerifyJwt(
++  token: string,
++  pem: string,
++  cfg: OAuthConfig,
++): Record<string, unknown> {
++  const parts = token.split(".");
++  if (parts.length !== 3) throw new Error("Invalid JWT structure");
++
++  function b64urlDecode(s: string): string {
++    const padded = s + "=".repeat((4 - (s.length % 4)) % 4);
++    return Buffer.from(padded.replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf8");
++  }
++
++  const payload = JSON.parse(b64urlDecode(parts[1])) as Record<string, unknown>;
++
++  if (cfg.JWT_VERIFY_SIGNATURE) {
++    const signingInput = `${parts[0]}.${parts[1]}`;
++    const sigB64 = parts[2].replace(/-/g, "+").replace(/_/g, "/");
++    const sig = Buffer.from(sigB64 + "=".repeat((4 - (sigB64.length % 4)) % 4), "base64");
++    const verify = createVerify("RSA-SHA256");
++    verify.update(signingInput);
++    if (!verify.verify(pem, sig)) {
++      throw new Error("InvalidTokenError: signature verification failed");
++    }
++  }
++
++  if (cfg.JWT_VERIFY_EXP) {
++    const exp = payload["exp"];
++    if (typeof exp !== "number" || exp < Math.floor(Date.now() / 1000)) {
++      throw new Error("ExpiredSignatureError");
++    }
++  }
++
++  return payload;
++}
++
++/**
++ * _verify_token: verify JWT and extract user info.
++ * Mirrors Python OAuthService._verify_token exactly.
++ */
++async function verifyToken(cfg: OAuthConfig, token: string): Promise<AuthResponse> {
++  const authResponse = emptyAuthResponse();
++
++  try {
++    // 获取 JWKS
++    const jwks = await getJwks(cfg);
++    if (!jwks || !Array.isArray(jwks["keys"]) || !(jwks["keys"] as unknown[]).length) {
++      authResponse.message = "Configuration mismatch";
++      return authResponse;
++    }
++
++    // 获取公钥 (use first key, mirrors Python: key = jwks["keys"][0])
++    const keys = jwks["keys"] as Record<string, string>[];
++    const key = keys[0];
++    const publicKey = jwkToPem(key);
++
++    // 解码 JWT
++    let decoded: Record<string, unknown>;
++    try {
++      decoded = decodeAndVerifyJwt(token, publicKey, cfg);
++    } catch (e) {
++      const msg = String(e);
++      if (msg.includes("ExpiredSignatureError")) {
++        console.warn("[oauth] Token expired");
++        authResponse.message = "Token expired";
++      } else {
++        console.warn("[oauth] Invalid token:", msg);
++        authResponse.message = "Invalid token";
++      }
++      return authResponse;
++    }
++
++    // 提取用户数据 (mirrors Python: jwt_data = decoded.get("data", {}))
++    const jwtData = (decoded["data"] ?? {}) as Record<string, unknown>;
++
++    if (jwtData && Object.keys(jwtData).length > 0) {
++      const authData: AuthenticationData = {
++        user_id: String(jwtData["user_id"] ?? ""),
++        username: String(jwtData["user_name"] ?? ""),
++        name: jwtData["name"] != null ? String(jwtData["name"]) : undefined,
++        email: jwtData["email"] != null ? String(jwtData["email"]) : undefined,
++        phone: jwtData["phone"] != null ? String(jwtData["phone"]) : undefined,
++        tenant_id: String(jwtData["tenant_id"] ?? ""),
++        tenant_name: jwtData["tenant_name"] != null ? String(jwtData["tenant_name"]) : undefined,
++        roles: Array.isArray(jwtData["role_ids"]) ? (jwtData["role_ids"] as string[]) : [],
++        exp: typeof decoded["exp"] === "number" ? decoded["exp"] : 0,
++        access_token: token,
++      };
++
++      authResponse.success = true;
++      authResponse.code = 200;
++      authResponse.data = authData;
++      console.log("[oauth] Token verified for user:", authData.username);
++    } else {
++      authResponse.message = "Invalid token data";
++    }
++  } catch (e) {
++    console.error("[oauth] Token verification error:", e);
++    authResponse.message = "Verification failed";
++  }
++
++  return authResponse;
++}
++
++/**
++ * get_authorization_token: main entry point.
++ * Mirrors Python OAuthService.get_authorization_token exactly.
++ */
++export async function getAuthorizationToken(
++  cfg: OAuthConfig,
++  code: string,
++  redirectUri?: string,
++): Promise<AuthResponse> {
++  const authResponse = emptyAuthResponse();
++
++  try {
++    // 1. 通过授权码换取 token
++    const tokenResponse = await exchangeTokenByCode(cfg, code, redirectUri);
++
++    if (tokenResponse.success) {
++      // 2. 验证 token 并获取用户信息
++      return await verifyToken(cfg, tokenResponse.access_token);
++    } else {
++      authResponse.message = "Failed to exchange token";
++      console.warn("[oauth] Token exchange failed for code:", code);
++    }
++  } catch (e) {
++    console.error("[oauth] Get authorization token error:", e);
++    authResponse.message = "Authentication failed";
++  }
++
++  return authResponse;
++}
++
++export function clearJwksCache(): void {
++  _jwksCache = null;
++}
+diff --git a/src/gateway/oauth-session.ts b/src/gateway/oauth-session.ts
+new file mode 100644
+index 000000000..20754caa2
+--- /dev/null
++++ b/src/gateway/oauth-session.ts
+@@ -0,0 +1,63 @@
++import { randomBytes } from "node:crypto";
++import type { IncomingMessage, ServerResponse } from "node:http";
++import type { AuthenticationData } from "./oauth-service.js";
++
++const SESSION_COOKIE = "oclaw_oauth_session";
++const SESSION_TTL_MS = 8 * 60 * 60 * 1000; // 8 hours
++
++type OAuthSession = {
++  user: AuthenticationData;
++  expiresAt: number;
++};
++
++const sessions = new Map<string, OAuthSession>();
++
++setInterval(() => {
++  const now = Date.now();
++  for (const [id, s] of sessions) {
++    if (s.expiresAt <= now) sessions.delete(id);
++  }
++}, 15 * 60 * 1000).unref();
++
++export function createOAuthSession(user: AuthenticationData): string {
++  const id = randomBytes(32).toString("hex");
++  sessions.set(id, { user, expiresAt: Date.now() + SESSION_TTL_MS });
++  return id;
++}
++
++export function resolveOAuthSession(req: IncomingMessage): AuthenticationData | null {
++  const id = parseCookie(req, SESSION_COOKIE);
++  if (!id) return null;
++  const session = sessions.get(id);
++  if (!session || session.expiresAt <= Date.now()) {
++    if (session) sessions.delete(id);
++    return null;
++  }
++  return session.user;
++}
++
++export function setSessionCookie(res: ServerResponse, sessionId: string, secure: boolean): void {
++  const maxAge = Math.floor(SESSION_TTL_MS / 1000);
++  const parts = [
++    `${SESSION_COOKIE}=${sessionId}`,
++    `Max-Age=${maxAge}`,
++    "Path=/",
++    "HttpOnly",
++    "SameSite=Lax",
++  ];
++  if (secure) parts.push("Secure");
++  res.setHeader("Set-Cookie", parts.join("; "));
++}
++
++export function clearSessionCookie(res: ServerResponse): void {
++  res.setHeader("Set-Cookie", `${SESSION_COOKIE}=; Max-Age=0; Path=/; HttpOnly; SameSite=Lax`);
++}
++
++function parseCookie(req: IncomingMessage, name: string): string | null {
++  const header = req.headers.cookie ?? "";
++  for (const part of header.split(";")) {
++    const [k, ...rest] = part.trim().split("=");
++    if (k?.trim() === name) return decodeURIComponent(rest.join("=").trim());
++  }
++  return null;
++}
+diff --git a/src/gateway/server-http.ts b/src/gateway/server-http.ts
+index 0af1120d2..2cdf85663 100644
+--- a/src/gateway/server-http.ts
++++ b/src/gateway/server-http.ts
+@@ -57,6 +57,7 @@ import {
+ } from "./hooks.js";
+ import { sendGatewayAuthFailure, setDefaultSecurityHeaders } from "./http-common.js";
+ import { getBearerToken } from "./http-utils.js";
++import { enforceOAuthSession, handleOAuthCallbackRequest } from "./oauth-http.js";
+ import { handleOpenAiHttpRequest } from "./openai-http.js";
+ import { handleOpenResponsesHttpRequest } from "./openresponses-http.js";
+ import { GATEWAY_CLIENT_MODES, normalizeGatewayClientMode } from "./protocol/client-info.js";
+@@ -514,6 +515,14 @@ export function createGatewayHttpServer(opts: {
+       if (await handleHooksRequest(req, res)) {
+         return;
+       }
++      // OAuth callback must be handled before the session gate.
++      if (await handleOAuthCallbackRequest(req, res)) {
++        return;
++      }
++      // Redirect unauthenticated browser requests to IAM login when OAuth is configured.
++      if (enforceOAuthSession(req, res)) {
++        return;
++      }
+       if (
+         await handleToolsInvokeHttpRequest(req, res, {
+           auth: resolvedAuth,
+-- 
+2.31.1
+
+
+From 42ca39687fd23929aea500ccde858a9c72f2501e Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=E6=9B=B9=E9=93=AD=E5=93=B2?= <mingzhe.cao@unisco.com>
+Date: Mon, 2 Mar 2026 16:50:28 +0800
+Subject: [PATCH 2/7] UP
+
+---
+ ui/src/ui/app-render.helpers.ts | 80 ++++++++++++++++++---------------
+ ui/src/ui/oauth-user.ts         | 37 +++++++++++++++
+ ui/src/ui/storage.ts            | 15 ++++++-
+ ui/src/ui/views/overview.ts     | 25 ++++++++---
+ 4 files changed, 113 insertions(+), 44 deletions(-)
+ create mode 100644 ui/src/ui/oauth-user.ts
+
+diff --git a/ui/src/ui/app-render.helpers.ts b/ui/src/ui/app-render.helpers.ts
+index d95414729..aa5987347 100644
+--- a/ui/src/ui/app-render.helpers.ts
++++ b/ui/src/ui/app-render.helpers.ts
+@@ -8,6 +8,7 @@ import { OpenClawApp } from "./app.ts";
+ import { ChatState, loadChatHistory } from "./controllers/chat.ts";
+ import { icons } from "./icons.ts";
+ import { iconForTab, pathForTab, titleForTab, type Tab } from "./navigation.ts";
++import { getOAuthChatSessionKey } from "./oauth-user.ts";
+ import type { ThemeTransitionContext } from "./theme-transition.ts";
+ import type { ThemeMode } from "./theme.ts";
+ import type { SessionsListResult } from "./types.ts";
+@@ -66,7 +67,7 @@ export function renderTab(state: AppViewState, tab: Tab) {
+         }
+         event.preventDefault();
+         if (tab === "chat") {
+-          const mainSessionKey = resolveSidebarChatSessionKey(state);
++          const mainSessionKey = getOAuthChatSessionKey() ?? resolveSidebarChatSessionKey(state);
+           if (state.sessionKey !== mainSessionKey) {
+             resetChatStateForSessionSwitch(state, mainSessionKey);
+             void state.loadAssistantIdentity();
+@@ -130,41 +131,48 @@ export function renderChatControls(state: AppViewState) {
+   return html`
+     <div class="chat-controls">
+       <label class="field chat-controls__session">
+-        <select
+-          .value=${state.sessionKey}
+-          ?disabled=${!state.connected}
+-          @change=${(e: Event) => {
+-            const next = (e.target as HTMLSelectElement).value;
+-            state.sessionKey = next;
+-            state.chatMessage = "";
+-            state.chatStream = null;
+-            (state as unknown as OpenClawApp).chatStreamStartedAt = null;
+-            state.chatRunId = null;
+-            (state as unknown as OpenClawApp).resetToolStream();
+-            (state as unknown as OpenClawApp).resetChatScroll();
+-            state.applySettings({
+-              ...state.settings,
+-              sessionKey: next,
+-              lastActiveSessionKey: next,
+-            });
+-            void state.loadAssistantIdentity();
+-            syncUrlWithSessionKey(
+-              state as unknown as Parameters<typeof syncUrlWithSessionKey>[0],
+-              next,
+-              true,
+-            );
+-            void loadChatHistory(state as unknown as ChatState);
+-          }}
+-        >
+-          ${repeat(
+-            sessionOptions,
+-            (entry) => entry.key,
+-            (entry) =>
+-              html`<option value=${entry.key} title=${entry.key}>
+-                ${entry.displayName ?? entry.key}
+-              </option>`,
+-          )}
+-        </select>
++        ${(() => {
++          const oauthSessionKey = getOAuthChatSessionKey();
++          if (oauthSessionKey) {
++            // OAuth mode: show locked session key as read-only text, no select
++            return html`<span class="chat-controls__session-key">${oauthSessionKey}</span>`;
++          }
++          return html`<select
++            .value=${state.sessionKey}
++            ?disabled=${!state.connected}
++            @change=${(e: Event) => {
++              const next = (e.target as HTMLSelectElement).value;
++              state.sessionKey = next;
++              state.chatMessage = "";
++              state.chatStream = null;
++              (state as unknown as OpenClawApp).chatStreamStartedAt = null;
++              state.chatRunId = null;
++              (state as unknown as OpenClawApp).resetToolStream();
++              (state as unknown as OpenClawApp).resetChatScroll();
++              state.applySettings({
++                ...state.settings,
++                sessionKey: next,
++                lastActiveSessionKey: next,
++              });
++              void state.loadAssistantIdentity();
++              syncUrlWithSessionKey(
++                state as unknown as Parameters<typeof syncUrlWithSessionKey>[0],
++                next,
++                true,
++              );
++              void loadChatHistory(state as unknown as ChatState);
++            }}
++          >
++            ${repeat(
++              sessionOptions,
++              (entry) => entry.key,
++              (entry) =>
++                html`<option value=${entry.key} title=${entry.key}>
++                  ${entry.displayName ?? entry.key}
++                </option>`,
++            )}
++          </select>`;
++        })()}
+       </label>
+       <button
+         class="btn btn--sm btn--icon"
+diff --git a/ui/src/ui/oauth-user.ts b/ui/src/ui/oauth-user.ts
+new file mode 100644
+index 000000000..1c108ba03
+--- /dev/null
++++ b/ui/src/ui/oauth-user.ts
+@@ -0,0 +1,37 @@
++const OAUTH_USER_KEY = "oclaw_oauth_user";
++
++export type OAuthUserData = {
++  user_id: string;
++  username?: string;
++  name?: string | null;
++  email?: string | null;
++  phone?: string | null;
++  tenant_id?: string;
++  tenant_name?: string | null;
++  roles?: string[];
++  exp?: number;
++  access_token?: string;
++};
++
++export function getOAuthUser(): OAuthUserData | null {
++  try {
++    const raw = localStorage.getItem(OAUTH_USER_KEY);
++    if (!raw) return null;
++    const parsed = JSON.parse(raw) as OAuthUserData;
++    if (!parsed?.user_id) return null;
++    return parsed;
++  } catch {
++    return null;
++  }
++}
++
++export function getOAuthUserId(): string | null {
++  return getOAuthUser()?.user_id ?? null;
++}
++
++/** Returns the locked session key for chat: agent:main:main:<userId>, or null if no OAuth user. */
++export function getOAuthChatSessionKey(): string | null {
++  const userId = getOAuthUserId();
++  if (!userId) return null;
++  return `agent:main:main:${userId}`;
++}
+diff --git a/ui/src/ui/storage.ts b/ui/src/ui/storage.ts
+index b32e6c3c5..fa463d53b 100644
+--- a/ui/src/ui/storage.ts
++++ b/ui/src/ui/storage.ts
+@@ -1,6 +1,7 @@
+ const KEY = "openclaw.control.settings.v1";
+ 
+ import { isSupportedLocale } from "../i18n/index.ts";
++import { getOAuthChatSessionKey } from "./oauth-user.ts";
+ import type { ThemeMode } from "./theme.ts";
+ 
+ export type UiSettings = {
+@@ -38,11 +39,17 @@ export function loadSettings(): UiSettings {
+ 
+   try {
+     const raw = localStorage.getItem(KEY);
++    // If OAuth user is present, override session keys with the locked value
++    const oauthSessionKey = getOAuthChatSessionKey();
+     if (!raw) {
++      if (oauthSessionKey) {
++        defaults.sessionKey = oauthSessionKey;
++        defaults.lastActiveSessionKey = oauthSessionKey;
++      }
+       return defaults;
+     }
+     const parsed = JSON.parse(raw) as Partial<UiSettings>;
+-    return {
++    const result: UiSettings = {
+       gatewayUrl:
+         typeof parsed.gatewayUrl === "string" && parsed.gatewayUrl.trim()
+           ? parsed.gatewayUrl.trim()
+@@ -81,6 +88,12 @@ export function loadSettings(): UiSettings {
+           : defaults.navGroupsCollapsed,
+       locale: isSupportedLocale(parsed.locale) ? parsed.locale : undefined,
+     };
++    // OAuth user overrides session keys with the locked value
++    if (oauthSessionKey) {
++      result.sessionKey = oauthSessionKey;
++      result.lastActiveSessionKey = oauthSessionKey;
++    }
++    return result;
+   } catch {
+     return defaults;
+   }
+diff --git a/ui/src/ui/views/overview.ts b/ui/src/ui/views/overview.ts
+index 3c341df47..882703c89 100644
+--- a/ui/src/ui/views/overview.ts
++++ b/ui/src/ui/views/overview.ts
+@@ -4,6 +4,7 @@ import { t, i18n, type Locale } from "../../i18n/index.ts";
+ import { buildExternalLinkRel, EXTERNAL_LINK_TARGET } from "../external-link.ts";
+ import { formatRelativeTimestamp, formatDurationHuman } from "../format.ts";
+ import type { GatewayHelloOk } from "../gateway.ts";
++import { getOAuthUserId } from "../oauth-user.ts";
+ import { formatNextRun } from "../presenter.ts";
+ import type { UiSettings } from "../storage.ts";
+ import { shouldShowPairingHint } from "./overview-hints.ts";
+@@ -241,13 +242,23 @@ export function renderOverview(props: OverviewProps) {
+           }
+           <label class="field">
+             <span>${t("overview.access.sessionKey")}</span>
+-            <input
+-              .value=${props.settings.sessionKey}
+-              @input=${(e: Event) => {
+-                const v = (e.target as HTMLInputElement).value;
+-                props.onSessionKeyChange(v);
+-              }}
+-            />
++            ${(() => {
++              const userId = getOAuthUserId();
++              if (userId) {
++                // OAuth mode: show locked session key (base:userId), not editable
++                const lockedKey = props.settings.sessionKey.endsWith(`:${userId}`)
++                  ? props.settings.sessionKey
++                  : `${props.settings.sessionKey}:${userId}`;
++                return html`<input .value=${lockedKey} readonly />`;
++              }
++              return html`<input
++                .value=${props.settings.sessionKey}
++                @input=${(e: Event) => {
++                  const v = (e.target as HTMLInputElement).value;
++                  props.onSessionKeyChange(v);
++                }}
++              />`;
++            })()}
+           </label>
+           <label class="field">
+             <span>${t("overview.access.language")}</span>
+-- 
+2.31.1
+
+
+From 6ad26490a08181ef0615a09c26db6f36a9933eda Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=E6=9B=B9=E9=93=AD=E5=93=B2?= <mingzhe.cao@unisco.com>
+Date: Tue, 3 Mar 2026 15:41:53 +0800
+Subject: [PATCH 3/7] =?UTF-8?q?=E6=9B=B4=E6=96=B0=E6=8E=88=E6=9D=83?=
+ =?UTF-8?q?=E6=A8=A1=E5=BC=8F?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ src/gateway/oauth-config.ts  |  30 +--
+ src/gateway/oauth-http.ts    | 285 +++++++++++++--------------
+ src/gateway/oauth-service.ts | 361 +++++++++++++++--------------------
+ src/gateway/server-http.ts   |  11 +-
+ 4 files changed, 311 insertions(+), 376 deletions(-)
+
+diff --git a/src/gateway/oauth-config.ts b/src/gateway/oauth-config.ts
+index b47648a77..308733ce6 100644
+--- a/src/gateway/oauth-config.ts
++++ b/src/gateway/oauth-config.ts
+@@ -2,19 +2,13 @@ export type OAuthConfig = {
+   IAM_HOST: string;
+   TOKEN_URL: string;
+   JWKS_URL: string;
+-  AUTHORIZE_URL: string;
+-  /** Value passed as Authorization header to token endpoint */
++  /** Value passed as Authorization header to login and token endpoints */
+   AUTHORIZATION: string;
+   CLIENT_ID: string;
+-  AUTHORIZATION_GRANT_TYPE: string;
+   JWT_ALGORITHM: string;
+   JWT_VERIFY_SIGNATURE: boolean;
+   JWT_VERIFY_EXP: boolean;
+-  JWT_VERIFY_AUD: boolean;
+-  JWT_VERIFY_ISS: boolean;
+   REQUEST_TIMEOUT: number;
+-  /** Origin-only redirect_uri registered with IAM, e.g. "http://localhost:18789" */
+-  REDIRECT_URI: string;
+ };
+ 
+ export function resolveOAuthConfig(): OAuthConfig | null {
+@@ -23,7 +17,7 @@ export function resolveOAuthConfig(): OAuthConfig | null {
+   if (!IAM_HOST || !CLIENT_ID) return null;
+ 
+   const CLIENT_SECRET = process.env.OAUTH_CLIENT_SECRET ?? "7c1f62cc-2d5a-487b-a1f7-a3dc0fb8bd28";
+-  // Build Basic auth header from clientId:clientSecret (matches Python AUTHORIZATION setting)
++  // Build Basic auth header from clientId:clientSecret
+   const AUTHORIZATION =
+     process.env.OAUTH_AUTHORIZATION ??
+     `Basic ${Buffer.from(`${CLIENT_ID}:${CLIENT_SECRET}`).toString("base64")}`;
+@@ -34,29 +28,9 @@ export function resolveOAuthConfig(): OAuthConfig | null {
+     AUTHORIZATION,
+     TOKEN_URL: process.env.OAUTH_TOKEN_URL ?? "/oauth2/token",
+     JWKS_URL: process.env.OAUTH_JWKS_URL ?? "/oauth2/jwks",
+-    AUTHORIZE_URL: process.env.OAUTH_AUTHORIZE_URL ?? "/oauth2/authorize",
+-    AUTHORIZATION_GRANT_TYPE: process.env.OAUTH_GRANT_TYPE ?? "authorization_code",
+     JWT_ALGORITHM: process.env.OAUTH_JWT_ALGORITHM ?? "RS256",
+     JWT_VERIFY_SIGNATURE: process.env.OAUTH_VERIFY_SIGNATURE !== "false",
+     JWT_VERIFY_EXP: process.env.OAUTH_VERIFY_EXP !== "false",
+-    JWT_VERIFY_AUD: process.env.OAUTH_VERIFY_AUD === "true",
+-    JWT_VERIFY_ISS: process.env.OAUTH_VERIFY_ISS === "true",
+     REQUEST_TIMEOUT: Number(process.env.OAUTH_REQUEST_TIMEOUT_MS ?? "10000"),
+-    REDIRECT_URI: process.env.OAUTH_REDIRECT_URI ?? "",
+   };
+ }
+-
+-export function buildAuthorizeUrl(cfg: OAuthConfig, redirectUri: string, state: string): string {
+-  const url = new URL(`${cfg.IAM_HOST}${cfg.AUTHORIZE_URL}`);
+-  url.searchParams.set("response_type", "code");
+-  url.searchParams.set("client_id", cfg.CLIENT_ID);
+-  url.searchParams.set("redirect_uri", redirectUri);
+-  url.searchParams.set("state", state);
+-  return url.toString();
+-}
+-
+-/** Returns full callback URL: e.g. http://localhost:18789/api/v1/auth/callback */
+-export function resolveRedirectUri(cfg: OAuthConfig, host: string, secure: boolean): string {
+-  if (cfg.REDIRECT_URI) return cfg.REDIRECT_URI;
+-  return `${secure ? "https" : "http"}://${host}/api/v1/auth/callback`;
+-}
+diff --git a/src/gateway/oauth-http.ts b/src/gateway/oauth-http.ts
+index 3fe1d51b3..f4bd7c153 100644
+--- a/src/gateway/oauth-http.ts
++++ b/src/gateway/oauth-http.ts
+@@ -1,17 +1,20 @@
+ import type { IncomingMessage, ServerResponse } from "node:http";
+-import { buildAuthorizeUrl, resolveOAuthConfig, resolveRedirectUri } from "./oauth-config.js";
+-import { getAuthorizationToken } from "./oauth-service.js";
++import { resolveOAuthConfig } from "./oauth-config.js";
++import { loginWithCredentials } from "./oauth-service.js";
+ import { createOAuthSession, resolveOAuthSession, setSessionCookie } from "./oauth-session.js";
+ import { sendJson, sendMethodNotAllowed } from "./http-common.js";
+ 
+-const CALLBACK_PATH = "/api/v1/auth/callback";
++const LOGIN_PATH = "/api/v1/auth/login";
++const LOGIN_PAGE_PATH = "/login";
+ 
+-// Paths exempt from the OAuth session gate — callback MUST be here
+-const EXEMPT_PREFIXES = [CALLBACK_PATH, "/assets/", "/favicon", "/_"];
++// Paths that never require an OAuth session
++const EXEMPT_PREFIXES = [LOGIN_PATH, LOGIN_PAGE_PATH, "/assets/", "/favicon", "/_"];
++
++// ── Session gate ──────────────────────────────────────────────────────────────
+ 
+ /**
+- * Gate: redirect unauthenticated browser requests to IAM login.
+- * Returns true if the request was handled (redirect or 401 sent).
++ * Gate: redirect unauthenticated browser requests to the custom login page.
++ * Returns true if the request was handled.
+  */
+ export function enforceOAuthSession(req: IncomingMessage, res: ServerResponse): boolean {
+   const cfg = resolveOAuthConfig();
+@@ -20,10 +23,7 @@ export function enforceOAuthSession(req: IncomingMessage, res: ServerResponse):
+   const url = new URL(req.url ?? "/", "http://localhost");
+   const pathname = url.pathname;
+ 
+-  // Callback and static assets are always exempt — never redirect these
+-  if (EXEMPT_PREFIXES.some((p) => pathname === p || pathname.startsWith(p))) {
+-    return false;
+-  }
++  if (EXEMPT_PREFIXES.some((p) => pathname === p || pathname.startsWith(p))) return false;
+ 
+   const user = resolveOAuthSession(req);
+   if (user) return false;
+@@ -34,39 +34,23 @@ export function enforceOAuthSession(req: IncomingMessage, res: ServerResponse):
+     return true;
+   }
+ 
+-  const host = req.headers.host ?? "localhost";
+-  const secure = isSecureRequest(req);
+-  const redirectUri = resolveRedirectUri(cfg, host, secure);
+-
+-  // Only store pathname as state — never include query string to avoid
+-  // encoding ?code=...&state=... from a previous failed callback
+-  const state = encodeURIComponent(url.pathname);
+-  const iamUrl = buildAuthorizeUrl(cfg, redirectUri, state);
+-
++  // Redirect to login page, pass original path as `next`
++  const next = encodeURIComponent(url.pathname);
+   res.statusCode = 302;
+-  res.setHeader("Location", iamUrl);
++  res.setHeader("Location", `${LOGIN_PAGE_PATH}?next=${next}`);
+   res.setHeader("Cache-Control", "no-store");
+   res.end();
+   return true;
+ }
+ 
+-/**
+- * Handle GET /api/v1/auth/callback?code=...&state=...
+- *
+- * Calls get_authorization_token (mirrors Python OAuthService.get_authorization_token),
+- * creates a session cookie, then redirects back to the original page.
+- *
+- * Also handles POST for programmatic use: { code, redirect_uri? } → { ok, user }
+- */
+-export async function handleOAuthCallbackRequest(
+-  req: IncomingMessage,
+-  res: ServerResponse,
+-): Promise<boolean> {
++// ── Login page (GET /login) ───────────────────────────────────────────────────
++
++export function handleLoginPageRequest(req: IncomingMessage, res: ServerResponse): boolean {
+   const url = new URL(req.url ?? "/", "http://localhost");
+-  if (url.pathname !== CALLBACK_PATH) return false;
++  if (url.pathname !== LOGIN_PAGE_PATH) return false;
+ 
+-  if (req.method !== "GET" && req.method !== "POST") {
+-    sendMethodNotAllowed(res, "GET, POST");
++  if (req.method !== "GET" && req.method !== "HEAD") {
++    sendMethodNotAllowed(res, "GET");
+     return true;
+   }
+ 
+@@ -76,46 +60,34 @@ export async function handleOAuthCallbackRequest(
+     return true;
+   }
+ 
+-  const host = req.headers.host ?? "localhost";
+-  const secure = isSecureRequest(req);
+-  const redirectUri = resolveRedirectUri(cfg, host, secure);
+-
+-  if (req.method === "GET") {
+-    const code = url.searchParams.get("code");
+-    const state = url.searchParams.get("state");
+-
+-    if (!code) {
+-      res.statusCode = 400;
+-      res.setHeader("Content-Type", "text/plain; charset=utf-8");
+-      res.end("Missing authorization code");
+-      return true;
+-    }
+-
+-    // Mirrors Python: get_authorization_token(code, redirect_uri)
+-    const authResponse = await getAuthorizationToken(cfg, code, redirectUri);
+-
+-    if (!authResponse.success || !authResponse.data) {
+-      // Show error page — do NOT redirect back to IAM (would cause infinite loop)
+-      res.statusCode = 200;
+-      res.setHeader("Content-Type", "text/html; charset=utf-8");
+-      res.setHeader("Cache-Control", "no-store");
+-      res.end(buildErrorPage(authResponse.message));
+-      return true;
+-    }
+-
+-    const sessionId = createOAuthSession(authResponse.data);
+-    setSessionCookie(res, sessionId, secure);
+-
+-    // Write user data to localStorage via an intermediate HTML page, then redirect
+-    const returnTo = safeReturnTo(decodeState(state ?? ""));
+-    res.statusCode = 200;
+-    res.setHeader("Content-Type", "text/html; charset=utf-8");
+-    res.setHeader("Cache-Control", "no-store");
+-    res.end(buildLoginSuccessPage(authResponse.data, returnTo));
++  const next = url.searchParams.get("next") ?? "/";
++  res.statusCode = 200;
++  res.setHeader("Content-Type", "text/html; charset=utf-8");
++  res.setHeader("Cache-Control", "no-store");
++  res.end(buildLoginPage(next));
++  return true;
++}
++
++// ── Login API (POST /api/v1/auth/login) ───────────────────────────────────────
++
++export async function handleLoginRequest(
++  req: IncomingMessage,
++  res: ServerResponse,
++): Promise<boolean> {
++  const url = new URL(req.url ?? "/", "http://localhost");
++  if (url.pathname !== LOGIN_PATH) return false;
++
++  if (req.method !== "POST") {
++    sendMethodNotAllowed(res, "POST");
++    return true;
++  }
++
++  const cfg = resolveOAuthConfig();
++  if (!cfg) {
++    sendJson(res, 503, { ok: false, error: "OAuth not configured" });
+     return true;
+   }
+ 
+-  // POST — programmatic
+   const body = await readJsonBody(req);
+   if (!body.ok) {
+     sendJson(res, 400, { ok: false, error: body.error });
+@@ -123,21 +95,22 @@ export async function handleOAuthCallbackRequest(
+   }
+ 
+   const data = body.value as Record<string, unknown>;
+-  const code = typeof data["code"] === "string" ? data["code"] : null;
+-  const overrideRedirectUri =
+-    typeof data["redirect_uri"] === "string" ? data["redirect_uri"] : redirectUri;
++  const username = typeof data["username"] === "string" ? data["username"].trim() : "";
++  const password = typeof data["password"] === "string" ? data["password"] : "";
+ 
+-  if (!code) {
+-    sendJson(res, 400, { ok: false, error: "Missing required parameter: code" });
++  if (!username || !password) {
++    sendJson(res, 400, { ok: false, error: "username and password are required" });
+     return true;
+   }
+ 
+-  const authResponse = await getAuthorizationToken(cfg, code, overrideRedirectUri);
++  const authResponse = await loginWithCredentials(cfg, username, password);
++
+   if (!authResponse.success || !authResponse.data) {
+-    sendJson(res, 401, { ok: false, error: authResponse.message });
++    sendJson(res, 401, { ok: false, error: authResponse.message || "Login failed" });
+     return true;
+   }
+ 
++  const secure = isSecureRequest(req);
+   const sessionId = createOAuthSession(authResponse.data);
+   setSessionCookie(res, sessionId, secure);
+   sendJson(res, 200, { ok: true, user: authResponse.data });
+@@ -152,23 +125,6 @@ function isSecureRequest(req: IncomingMessage): boolean {
+   return (req.socket as { encrypted?: boolean }).encrypted === true;
+ }
+ 
+-function safeReturnTo(raw: string): string {
+-  if (!raw || raw.startsWith("//") || /^https?:\/\//i.test(raw)) return "/";
+-  return raw.startsWith("/") ? raw : "/";
+-}
+-
+-function decodeState(state: string): string {
+-  try {
+-    const once = decodeURIComponent(state);
+-    if (/%[0-9a-fA-F]{2}/.test(once)) {
+-      try { return decodeURIComponent(once); } catch { return once; }
+-    }
+-    return once;
+-  } catch {
+-    return "/";
+-  }
+-}
+-
+ async function readJsonBody(
+   req: IncomingMessage,
+ ): Promise<{ ok: true; value: unknown } | { ok: false; error: string }> {
+@@ -177,60 +133,105 @@ async function readJsonBody(
+     let size = 0;
+     req.on("data", (chunk: Buffer) => {
+       size += chunk.length;
+-      if (size > 65536) { resolve({ ok: false, error: "Body too large" }); req.destroy(); }
+-      else chunks.push(chunk);
++      if (size > 65536) {
++        resolve({ ok: false, error: "Body too large" });
++        req.destroy();
++      } else {
++        chunks.push(chunk);
++      }
+     });
+     req.on("end", () => {
+       try {
+         const raw = Buffer.concat(chunks).toString("utf8");
+         resolve({ ok: true, value: raw ? (JSON.parse(raw) as unknown) : {} });
+-      } catch { resolve({ ok: false, error: "Invalid JSON" }); }
++      } catch {
++        resolve({ ok: false, error: "Invalid JSON" });
++      }
+     });
+     req.on("error", () => resolve({ ok: false, error: "Read error" }));
+   });
+ }
+ 
+-function buildErrorPage(message: string): string {
+-  const escaped = message.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+-  return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+-<title>Login Failed</title>
+-<style>body{font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#f5f5f5}
+-.box{background:#fff;padding:2rem 3rem;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,.1);text-align:center;max-width:400px}
+-h2{color:#d32f2f;margin-top:0}p{color:#555}a{color:#1976d2;text-decoration:none;font-weight:bold}</style>
+-</head><body><div class="box">
+-<h2>Login Failed</h2>
+-<p>${escaped}</p>
+-<p><a href="/">Try again</a></p>
+-</div></body></html>`;
+-}
+-
+-function buildLoginSuccessPage(
+-  user: import("./oauth-service.js").AuthenticationData,
+-  returnTo: string,
+-): string {
+-  const payload = JSON.stringify({
+-    user_id: user.user_id,
+-    username: user.username,
+-    name: user.name ?? null,
+-    email: user.email ?? null,
+-    phone: user.phone ?? null,
+-    tenant_id: user.tenant_id,
+-    tenant_name: user.tenant_name ?? null,
+-    roles: user.roles,
+-    exp: user.exp,
+-    access_token: user.access_token,
++// ── Login page HTML ───────────────────────────────────────────────────────────
++
++function buildLoginPage(next: string): string {
++  const safeNext = next.replace(/'/g, "\\'").replace(/</g, "&lt;");
++  return `<!DOCTYPE html>
++<html lang="en">
++<head>
++<meta charset="utf-8">
++<meta name="viewport" content="width=device-width, initial-scale=1">
++<title>Sign In</title>
++<style>
++*{box-sizing:border-box;margin:0;padding:0}
++body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f0f2f5;display:flex;align-items:center;justify-content:center;min-height:100vh}
++.card{background:#fff;border-radius:12px;box-shadow:0 4px 24px rgba(0,0,0,.08);padding:2.5rem 2rem;width:100%;max-width:380px}
++h1{font-size:1.4rem;font-weight:600;color:#111;margin-bottom:1.5rem;text-align:center}
++.field{display:flex;flex-direction:column;gap:6px;margin-bottom:1rem}
++label{font-size:.85rem;font-weight:500;color:#444}
++input{border:1px solid #d1d5db;border-radius:8px;padding:.6rem .8rem;font-size:.95rem;outline:none;transition:border-color .15s}
++input:focus{border-color:#4f46e5}
++.btn{width:100%;padding:.7rem;background:#4f46e5;color:#fff;border:none;border-radius:8px;font-size:1rem;font-weight:500;cursor:pointer;margin-top:.5rem;transition:background .15s}
++.btn:hover{background:#4338ca}
++.btn:disabled{background:#a5b4fc;cursor:not-allowed}
++.error{color:#dc2626;font-size:.85rem;margin-top:.75rem;text-align:center;min-height:1.2em}
++</style>
++</head>
++<body>
++<div class="card">
++  <h1>Sign In</h1>
++  <form id="form">
++    <div class="field">
++      <label for="username">Username</label>
++      <input id="username" name="username" type="text" autocomplete="username" required autofocus />
++    </div>
++    <div class="field">
++      <label for="password">Password</label>
++      <input id="password" name="password" type="password" autocomplete="current-password" required />
++    </div>
++    <button class="btn" type="submit" id="btn">Sign In</button>
++    <div class="error" id="err"></div>
++  </form>
++</div>
++<script>
++(function(){
++  var next = '${safeNext}';
++  var form = document.getElementById('form');
++  var btn = document.getElementById('btn');
++  var err = document.getElementById('err');
++  form.addEventListener('submit', function(e){
++    e.preventDefault();
++    err.textContent = '';
++    btn.disabled = true;
++    btn.textContent = 'Signing in...';
++    var username = document.getElementById('username').value.trim();
++    var password = document.getElementById('password').value;
++    fetch('${LOGIN_PATH}', {
++      method: 'POST',
++      headers: {'Content-Type': 'application/json'},
++      body: JSON.stringify({username: username, password: password})
++    })
++    .then(function(r){ return r.json(); })
++    .then(function(data){
++      if(data.ok && data.user){
++        try{ localStorage.setItem('oclaw_oauth_user', JSON.stringify(data.user)); }catch(e){}
++        var dest = decodeURIComponent(next) || '/';
++        if(!dest.startsWith('/')) dest = '/';
++        window.location.replace(dest);
++      } else {
++        err.textContent = data.error || 'Login failed';
++        btn.disabled = false;
++        btn.textContent = 'Sign In';
++      }
++    })
++    .catch(function(){
++      err.textContent = 'Network error, please try again';
++      btn.disabled = false;
++      btn.textContent = 'Sign In';
++    });
+   });
+-  // Escape for safe embedding inside a JS template literal
+-  const safePayload = payload
+-    .replace(/\\/g, "\\\\")
+-    .replace(/`/g, "\\`")
+-    .replace(/<\/script>/gi, "<\\/script>");
+-  const safeReturn = returnTo.replace(/'/g, "\\'");
+-  return [
+-    "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>Logging in...</title></head>",
+-    "<body><script>",
+-    "try{localStorage.setItem('oclaw_oauth_user',`" + safePayload + "`);}catch(e){console.warn('localStorage write failed:',e);}",
+-    "window.location.replace('" + safeReturn + "');",
+-    "</script></body></html>",
+-  ].join("\n");
++})();
++</script>
++</body>
++</html>`;
+ }
+diff --git a/src/gateway/oauth-service.ts b/src/gateway/oauth-service.ts
+index 606dc4043..8973271a7 100644
+--- a/src/gateway/oauth-service.ts
++++ b/src/gateway/oauth-service.ts
+@@ -1,16 +1,7 @@
+ import { createPublicKey, createVerify } from "node:crypto";
+ import type { OAuthConfig } from "./oauth-config.js";
+ 
+-// ── Types (mirrors Python schemas) ───────────────────────────────────────────
+-
+-export type TokenResponse = {
+-  success: boolean;
+-  access_token: string;
+-  token_type: string;
+-  expires_in: number;
+-  refresh_token: string;
+-  scope: string;
+-};
++// ── Types ─────────────────────────────────────────────────────────────────────
+ 
+ export type AuthenticationData = {
+   user_id: string;
+@@ -36,246 +27,212 @@ function emptyAuthResponse(): AuthResponse {
+   return { success: false, code: 0, message: "", data: null };
+ }
+ 
+-// ── JWKS cache (mirrors Python self._jwks_cache) ──────────────────────────────
++// ── JWKS cache ────────────────────────────────────────────────────────────────
+ 
+ let _jwksCache: Record<string, unknown> | null = null;
+ 
+-// ── OAuthService methods (mirrors Python class) ───────────────────────────────
++// ── Password login ────────────────────────────────────────────────────────────
+ 
+ /**
+- * _exchange_token_by_code: exchange authorization code for token.
+- * Mirrors Python OAuthService._exchange_token_by_code exactly.
++ * Login with username + password via POST /platform/v1/users/login.
++ * Returns the access_token on success, or throws with a user-facing message.
+  */
+-async function exchangeTokenByCode(
++async function loginWithPassword(
+   cfg: OAuthConfig,
+-  code: string,
+-  redirectUri?: string,
+-): Promise<TokenResponse> {
+-  const tokenResponse: TokenResponse = {
+-    success: false,
+-    access_token: "",
+-    token_type: "",
+-    expires_in: 0,
+-    refresh_token: "",
+-    scope: "",
+-  };
+-
+-  try {
+-    const url = `${cfg.IAM_HOST}${cfg.TOKEN_URL}`;
+-    const formData = new URLSearchParams({
+-      grant_type: cfg.AUTHORIZATION_GRANT_TYPE,
+-      code,
+-    });
+-    if (redirectUri) {
+-      formData.set("redirect_uri", redirectUri);
+-    }
+-
+-    console.log("[oauth] _exchange_token_by_code →", url, "redirect_uri:", redirectUri ?? "(none)");
++  username: string,
++  password: string,
++): Promise<string> {
++  const url = `${cfg.IAM_HOST}/platform/v1/users/login`;
++  console.log("[oauth] loginWithPassword →", url);
++
++  const response = await fetch(url, {
++    method: "POST",
++    headers: {
++      Authorization: cfg.AUTHORIZATION,
++      "Content-Type": "application/json",
++    },
++    body: JSON.stringify({ username, password }),
++    signal: AbortSignal.timeout(cfg.REQUEST_TIMEOUT),
++  });
+ 
+-    const response = await fetch(url, {
+-      method: "POST",
+-      headers: {
+-        Authorization: cfg.AUTHORIZATION,
+-        "Content-Type": "application/x-www-form-urlencoded",
+-      },
+-      body: formData.toString(),
+-      signal: AbortSignal.timeout(cfg.REQUEST_TIMEOUT),
+-    });
++  const data = (await response.json()) as Record<string, unknown>;
++  const code = data["code"];
+ 
+-    if (response.status === 200) {
+-      const data = (await response.json()) as Record<string, unknown>;
+-      tokenResponse.success = true;
+-      tokenResponse.access_token = String(data["access_token"] ?? "");
+-      tokenResponse.token_type = String(data["token_type"] ?? "");
+-      tokenResponse.expires_in = Number(data["expires_in"] ?? 0);
+-      tokenResponse.refresh_token = String(data["refresh_token"] ?? "");
+-      tokenResponse.scope = String(data["scope"] ?? "");
+-      console.log("[oauth] Token exchanged successfully");
+-    } else {
+-      const body = await response.text().catch(() => "");
+-      console.error("[oauth] Token exchange failed:", response.status, body);
+-    }
+-  } catch (e) {
+-    console.error("[oauth] Exchange token error:", e);
++  if (code !== 0) {
++    const msg = typeof data["msg"] === "string" ? data["msg"] : "Invalid username or password";
++    console.error("[oauth] Login failed, code:", code, msg);
++    throw new Error(msg);
+   }
+ 
+-  return tokenResponse;
++  const tokenData = data["data"] as Record<string, unknown>;
++  const accessToken = String(tokenData["access_token"] ?? "");
++  if (!accessToken) throw new Error("No access_token in login response");
++
++  console.log("[oauth] Login successful for:", username);
++  return accessToken;
+ }
+ 
++// ── User info ─────────────────────────────────────────────────────────────────
++
++type UserInfoData = {
++  id: string;
++  userName?: string;
++  firstName?: string;
++  lastName?: string;
++  email?: string;
++  contactNumber?: string;
++  companyCode?: string;
++  userRoles?: Array<{ id?: string; name?: string }>;
++};
++
+ /**
+- * _get_jwks: fetch JWKS with cache.
+- * Mirrors Python OAuthService._get_jwks exactly.
++ * Fetch user profile via GET /user-info with Bearer token.
+  */
++async function fetchUserInfo(cfg: OAuthConfig, accessToken: string): Promise<UserInfoData> {
++  const url = `${cfg.IAM_HOST}/user-info`;
++  console.log("[oauth] fetchUserInfo →", url);
++
++  const response = await fetch(url, {
++    method: "GET",
++    headers: { Authorization: `Bearer ${accessToken}` },
++    signal: AbortSignal.timeout(cfg.REQUEST_TIMEOUT),
++  });
++
++  const data = (await response.json()) as Record<string, unknown>;
++  const code = data["code"];
++
++  if (code !== 0) {
++    const msg = typeof data["msg"] === "string" ? data["msg"] : "Failed to fetch user info";
++    console.error("[oauth] fetchUserInfo failed, code:", code, msg);
++    throw new Error(msg);
++  }
++
++  return data["data"] as UserInfoData;
++}
++
++// ── JWT helpers (kept for token expiry extraction) ────────────────────────────
++
++function b64urlDecode(s: string): string {
++  const padded = s + "=".repeat((4 - (s.length % 4)) % 4);
++  return Buffer.from(padded.replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf8");
++}
++
++function extractJwtExp(token: string): number {
++  try {
++    const parts = token.split(".");
++    if (parts.length !== 3) return 0;
++    const payload = JSON.parse(b64urlDecode(parts[1])) as Record<string, unknown>;
++    return typeof payload["exp"] === "number" ? payload["exp"] : 0;
++  } catch {
++    return 0;
++  }
++}
++
++// ── JWKS / JWT verify (kept for optional token verification) ──────────────────
++
+ async function getJwks(cfg: OAuthConfig): Promise<Record<string, unknown> | null> {
+   if (_jwksCache) return _jwksCache;
+-
+   try {
+     const url = `${cfg.IAM_HOST}${cfg.JWKS_URL}`;
+-    const response = await fetch(url, {
+-      signal: AbortSignal.timeout(cfg.REQUEST_TIMEOUT),
+-    });
+-
++    const response = await fetch(url, { signal: AbortSignal.timeout(cfg.REQUEST_TIMEOUT) });
+     if (response.status === 200) {
+       _jwksCache = (await response.json()) as Record<string, unknown>;
+-      console.log("[oauth] JWKS fetched successfully");
+       return _jwksCache;
+-    } else {
+-      console.error("[oauth] Failed to fetch JWKS:", response.status);
+     }
++    console.error("[oauth] Failed to fetch JWKS:", response.status);
+   } catch (e) {
+     console.error("[oauth] Get JWKS error:", e);
+   }
+-
+   return null;
+ }
+ 
+-/**
+- * _jwk_to_pem: convert JWK to PEM public key.
+- * Mirrors Python OAuthService._jwk_to_pem using Node built-in crypto.
+- */
+ function jwkToPem(jwk: Record<string, string>): string {
+-  // Node's createPublicKey accepts JWK directly — equivalent to Python's
+-  // RSAPublicNumbers(e, n).public_key().public_bytes(PEM, SubjectPublicKeyInfo)
+-  const pubKey = createPublicKey({
+-    key: { kty: "RSA", e: jwk["e"], n: jwk["n"] },
+-    format: "jwk",
+-  });
++  const pubKey = createPublicKey({ key: { kty: "RSA", e: jwk["e"], n: jwk["n"] }, format: "jwk" });
+   return pubKey.export({ type: "spki", format: "pem" }) as string;
+ }
+ 
+-/**
+- * Minimal RS256 JWT verify — mirrors Python jwt.decode() with options dict.
+- * Supports verify_signature, verify_exp (verify_aud/verify_iss always false here).
+- */
+-function decodeAndVerifyJwt(
+-  token: string,
+-  pem: string,
+-  cfg: OAuthConfig,
+-): Record<string, unknown> {
++function verifyJwtSignature(token: string, pem: string): void {
+   const parts = token.split(".");
+-  if (parts.length !== 3) throw new Error("Invalid JWT structure");
+-
+-  function b64urlDecode(s: string): string {
+-    const padded = s + "=".repeat((4 - (s.length % 4)) % 4);
+-    return Buffer.from(padded.replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf8");
+-  }
+-
+-  const payload = JSON.parse(b64urlDecode(parts[1])) as Record<string, unknown>;
+-
+-  if (cfg.JWT_VERIFY_SIGNATURE) {
+-    const signingInput = `${parts[0]}.${parts[1]}`;
+-    const sigB64 = parts[2].replace(/-/g, "+").replace(/_/g, "/");
+-    const sig = Buffer.from(sigB64 + "=".repeat((4 - (sigB64.length % 4)) % 4), "base64");
+-    const verify = createVerify("RSA-SHA256");
+-    verify.update(signingInput);
+-    if (!verify.verify(pem, sig)) {
+-      throw new Error("InvalidTokenError: signature verification failed");
+-    }
+-  }
+-
+-  if (cfg.JWT_VERIFY_EXP) {
+-    const exp = payload["exp"];
+-    if (typeof exp !== "number" || exp < Math.floor(Date.now() / 1000)) {
+-      throw new Error("ExpiredSignatureError");
+-    }
+-  }
+-
+-  return payload;
++  const signingInput = `${parts[0]}.${parts[1]}`;
++  const sigB64 = parts[2].replace(/-/g, "+").replace(/_/g, "/");
++  const sig = Buffer.from(sigB64 + "=".repeat((4 - (sigB64.length % 4)) % 4), "base64");
++  const verify = createVerify("RSA-SHA256");
++  verify.update(signingInput);
++  if (!verify.verify(pem, sig)) throw new Error("JWT signature verification failed");
+ }
+ 
++// ── Main entry point ──────────────────────────────────────────────────────────
++
+ /**
+- * _verify_token: verify JWT and extract user info.
+- * Mirrors Python OAuthService._verify_token exactly.
++ * Authenticate with username + password:
++ * 1. POST /platform/v1/users/login → access_token
++ * 2. GET /user-info → user profile
++ * 3. Optionally verify JWT signature if JWKS available
++ * Returns AuthResponse with AuthenticationData shaped for oclaw_oauth_user.
+  */
+-async function verifyToken(cfg: OAuthConfig, token: string): Promise<AuthResponse> {
++export async function loginWithCredentials(
++  cfg: OAuthConfig,
++  username: string,
++  password: string,
++): Promise<AuthResponse> {
+   const authResponse = emptyAuthResponse();
+ 
+   try {
+-    // 获取 JWKS
+-    const jwks = await getJwks(cfg);
+-    if (!jwks || !Array.isArray(jwks["keys"]) || !(jwks["keys"] as unknown[]).length) {
+-      authResponse.message = "Configuration mismatch";
+-      return authResponse;
++    // Step 1: password login → access_token
++    const accessToken = await loginWithPassword(cfg, username, password);
++
++    // Step 2: fetch user profile
++    const userInfo = await fetchUserInfo(cfg, accessToken);
++
++    // Step 3: optional JWT signature verify
++    if (cfg.JWT_VERIFY_SIGNATURE) {
++      try {
++        const jwks = await getJwks(cfg);
++        if (jwks && Array.isArray(jwks["keys"]) && (jwks["keys"] as unknown[]).length > 0) {
++          const key = (jwks["keys"] as Record<string, string>[])[0];
++          verifyJwtSignature(accessToken, jwkToPem(key));
++        }
++      } catch (e) {
++        console.warn("[oauth] JWT signature verify failed (non-fatal):", e);
++      }
+     }
+ 
+-    // 获取公钥 (use first key, mirrors Python: key = jwks["keys"][0])
+-    const keys = jwks["keys"] as Record<string, string>[];
+-    const key = keys[0];
+-    const publicKey = jwkToPem(key);
+-
+-    // 解码 JWT
+-    let decoded: Record<string, unknown>;
+-    try {
+-      decoded = decodeAndVerifyJwt(token, publicKey, cfg);
+-    } catch (e) {
+-      const msg = String(e);
+-      if (msg.includes("ExpiredSignatureError")) {
+-        console.warn("[oauth] Token expired");
++    // Step 4: check token expiry
++    if (cfg.JWT_VERIFY_EXP) {
++      const exp = extractJwtExp(accessToken);
++      if (exp > 0 && exp < Math.floor(Date.now() / 1000)) {
+         authResponse.message = "Token expired";
+-      } else {
+-        console.warn("[oauth] Invalid token:", msg);
+-        authResponse.message = "Invalid token";
++        return authResponse;
+       }
+-      return authResponse;
+     }
+ 
+-    // 提取用户数据 (mirrors Python: jwt_data = decoded.get("data", {}))
+-    const jwtData = (decoded["data"] ?? {}) as Record<string, unknown>;
+-
+-    if (jwtData && Object.keys(jwtData).length > 0) {
+-      const authData: AuthenticationData = {
+-        user_id: String(jwtData["user_id"] ?? ""),
+-        username: String(jwtData["user_name"] ?? ""),
+-        name: jwtData["name"] != null ? String(jwtData["name"]) : undefined,
+-        email: jwtData["email"] != null ? String(jwtData["email"]) : undefined,
+-        phone: jwtData["phone"] != null ? String(jwtData["phone"]) : undefined,
+-        tenant_id: String(jwtData["tenant_id"] ?? ""),
+-        tenant_name: jwtData["tenant_name"] != null ? String(jwtData["tenant_name"]) : undefined,
+-        roles: Array.isArray(jwtData["role_ids"]) ? (jwtData["role_ids"] as string[]) : [],
+-        exp: typeof decoded["exp"] === "number" ? decoded["exp"] : 0,
+-        access_token: token,
+-      };
+-
+-      authResponse.success = true;
+-      authResponse.code = 200;
+-      authResponse.data = authData;
+-      console.log("[oauth] Token verified for user:", authData.username);
+-    } else {
+-      authResponse.message = "Invalid token data";
+-    }
+-  } catch (e) {
+-    console.error("[oauth] Token verification error:", e);
+-    authResponse.message = "Verification failed";
+-  }
+-
+-  return authResponse;
+-}
+-
+-/**
+- * get_authorization_token: main entry point.
+- * Mirrors Python OAuthService.get_authorization_token exactly.
+- */
+-export async function getAuthorizationToken(
+-  cfg: OAuthConfig,
+-  code: string,
+-  redirectUri?: string,
+-): Promise<AuthResponse> {
+-  const authResponse = emptyAuthResponse();
+-
+-  try {
+-    // 1. 通过授权码换取 token
+-    const tokenResponse = await exchangeTokenByCode(cfg, code, redirectUri);
+-
+-    if (tokenResponse.success) {
+-      // 2. 验证 token 并获取用户信息
+-      return await verifyToken(cfg, tokenResponse.access_token);
+-    } else {
+-      authResponse.message = "Failed to exchange token";
+-      console.warn("[oauth] Token exchange failed for code:", code);
+-    }
++    // Build AuthenticationData from user-info response
++    const roles = Array.isArray(userInfo.userRoles)
++      ? userInfo.userRoles.map((r) => String(r.id ?? "")).filter(Boolean)
++      : [];
++
++    const name = [userInfo.firstName, userInfo.lastName].filter(Boolean).join(" ") || undefined;
++
++    const authData: AuthenticationData = {
++      user_id: String(userInfo.id ?? ""),
++      username: String(userInfo.userName ?? username),
++      name,
++      email: userInfo.email ?? undefined,
++      phone: userInfo.contactNumber ?? undefined,
++      tenant_id: String(userInfo.companyCode ?? ""),
++      roles,
++      exp: extractJwtExp(accessToken),
++      access_token: accessToken,
++    };
++
++    authResponse.success = true;
++    authResponse.code = 200;
++    authResponse.data = authData;
++    console.log("[oauth] Authenticated user:", authData.username, "id:", authData.user_id);
+   } catch (e) {
+-    console.error("[oauth] Get authorization token error:", e);
+-    authResponse.message = "Authentication failed";
++    const msg =  "Authentication failed";
++    console.error("[oauth] loginWithCredentials error:", e);
++    authResponse.message = msg;
+   }
+ 
+   return authResponse;
+diff --git a/src/gateway/server-http.ts b/src/gateway/server-http.ts
+index 2cdf85663..569de9705 100644
+--- a/src/gateway/server-http.ts
++++ b/src/gateway/server-http.ts
+@@ -57,7 +57,7 @@ import {
+ } from "./hooks.js";
+ import { sendGatewayAuthFailure, setDefaultSecurityHeaders } from "./http-common.js";
+ import { getBearerToken } from "./http-utils.js";
+-import { enforceOAuthSession, handleOAuthCallbackRequest } from "./oauth-http.js";
++import { enforceOAuthSession, handleLoginPageRequest, handleLoginRequest } from "./oauth-http.js";
+ import { handleOpenAiHttpRequest } from "./openai-http.js";
+ import { handleOpenResponsesHttpRequest } from "./openresponses-http.js";
+ import { GATEWAY_CLIENT_MODES, normalizeGatewayClientMode } from "./protocol/client-info.js";
+@@ -515,11 +515,14 @@ export function createGatewayHttpServer(opts: {
+       if (await handleHooksRequest(req, res)) {
+         return;
+       }
+-      // OAuth callback must be handled before the session gate.
+-      if (await handleOAuthCallbackRequest(req, res)) {
++      // Login page and login API must be handled before the session gate.
++      if (handleLoginPageRequest(req, res)) {
+         return;
+       }
+-      // Redirect unauthenticated browser requests to IAM login when OAuth is configured.
++      if (await handleLoginRequest(req, res)) {
++        return;
++      }
++      // Redirect unauthenticated browser requests to the login page when OAuth is configured.
+       if (enforceOAuthSession(req, res)) {
+         return;
+       }
+-- 
+2.31.1
+
+
+From 21bb166164ae6a1991bd37431ff4fc70b301e7cf Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=E6=9B=B9=E9=93=AD=E5=93=B2?= <mingzhe.cao@unisco.com>
+Date: Wed, 4 Mar 2026 18:30:22 +0800
+Subject: [PATCH 4/7] up EXEMPT_PREFIXES
+
+---
+ src/gateway/oauth-http.ts | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/gateway/oauth-http.ts b/src/gateway/oauth-http.ts
+index f4bd7c153..3dc2060dc 100644
+--- a/src/gateway/oauth-http.ts
++++ b/src/gateway/oauth-http.ts
+@@ -8,7 +8,7 @@ const LOGIN_PATH = "/api/v1/auth/login";
+ const LOGIN_PAGE_PATH = "/login";
+ 
+ // Paths that never require an OAuth session
+-const EXEMPT_PREFIXES = [LOGIN_PATH, LOGIN_PAGE_PATH, "/assets/", "/favicon", "/_"];
++const EXEMPT_PREFIXES = [LOGIN_PATH, LOGIN_PAGE_PATH, "/assets/", "/favicon", "/_", "/wecom/"];
+ 
+ // ── Session gate ──────────────────────────────────────────────────────────────
+ 
+-- 
+2.31.1
+
+
+From 11a0a8cd16838f3d9292a80e165fcc39e9e86827 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=E6=9B=B9=E9=93=AD=E5=93=B2?= <mingzhe.cao@unisco.com>
+Date: Sun, 8 Mar 2026 13:34:04 +0800
+Subject: [PATCH 5/7] =?UTF-8?q?=E6=9B=B4=E6=96=B0Cil=E9=80=BB=E8=BE=91?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ src/gateway/oauth-config.ts  |  6 +++
+ src/gateway/oauth-http.ts    |  6 +--
+ src/gateway/oauth-service.ts | 87 +++++++++++++++++++++++++++++++++++-
+ 3 files changed, 95 insertions(+), 4 deletions(-)
+
+diff --git a/src/gateway/oauth-config.ts b/src/gateway/oauth-config.ts
+index 308733ce6..af3c7de9d 100644
+--- a/src/gateway/oauth-config.ts
++++ b/src/gateway/oauth-config.ts
+@@ -9,6 +9,10 @@ export type OAuthConfig = {
+   JWT_VERIFY_SIGNATURE: boolean;
+   JWT_VERIFY_EXP: boolean;
+   REQUEST_TIMEOUT: number;
++  /** Bearer token for OpenClaw CLI gateway API (OPENCLAW_CLI_API_TOKEN) */
++  CLI_API_TOKEN: string;
++  /** Base URL for OpenClaw CLI gateway API */
++  CLI_API_HOST: string;
+ };
+ 
+ export function resolveOAuthConfig(): OAuthConfig | null {
+@@ -32,5 +36,7 @@ export function resolveOAuthConfig(): OAuthConfig | null {
+     JWT_VERIFY_SIGNATURE: process.env.OAUTH_VERIFY_SIGNATURE !== "false",
+     JWT_VERIFY_EXP: process.env.OAUTH_VERIFY_EXP !== "false",
+     REQUEST_TIMEOUT: Number(process.env.OAUTH_REQUEST_TIMEOUT_MS ?? "10000"),
++    CLI_API_TOKEN: process.env.OPENCLAW_CLI_API_TOKEN ?? "Token",
++    CLI_API_HOST: process.env.OPENCLAW_CLI_API_HOST ?? "http://localhost:18790",
+   };
+ }
+diff --git a/src/gateway/oauth-http.ts b/src/gateway/oauth-http.ts
+index 3dc2060dc..57992b6b4 100644
+--- a/src/gateway/oauth-http.ts
++++ b/src/gateway/oauth-http.ts
+@@ -113,7 +113,8 @@ export async function handleLoginRequest(
+   const secure = isSecureRequest(req);
+   const sessionId = createOAuthSession(authResponse.data);
+   setSessionCookie(res, sessionId, secure);
+-  sendJson(res, 200, { ok: true, user: authResponse.data });
++  // Always redirect to /overview after login
++  sendJson(res, 200, { ok: true, user: authResponse.data, redirect: "/overview" });
+   return true;
+ }
+ 
+@@ -215,8 +216,7 @@ input:focus{border-color:#4f46e5}
+     .then(function(data){
+       if(data.ok && data.user){
+         try{ localStorage.setItem('oclaw_oauth_user', JSON.stringify(data.user)); }catch(e){}
+-        var dest = decodeURIComponent(next) || '/';
+-        if(!dest.startsWith('/')) dest = '/';
++        var dest = data.redirect || '/overview';
+         window.location.replace(dest);
+       } else {
+         err.textContent = data.error || 'Login failed';
+diff --git a/src/gateway/oauth-service.ts b/src/gateway/oauth-service.ts
+index 8973271a7..c8b38c66d 100644
+--- a/src/gateway/oauth-service.ts
++++ b/src/gateway/oauth-service.ts
+@@ -230,9 +230,21 @@ export async function loginWithCredentials(
+     authResponse.data = authData;
+     console.log("[oauth] Authenticated user:", authData.username, "id:", authData.user_id);
+   } catch (e) {
+-    const msg =  "Authentication failed";
++    const msg = e instanceof Error ? e.message : "Authentication failed";
+     console.error("[oauth] loginWithCredentials error:", e);
+     authResponse.message = msg;
++    return authResponse;
++  }
++
++  // Ensure user exists in OpenClaw CLI gateway; create if not.
++  // Runs after auth succeeds — errors here are non-fatal (logged only).
++  try {
++    const exists = await checkCliUserExists(cfg, authResponse.data!.username, authResponse.data!.user_id);
++    if (!exists) {
++      await createCliUser(cfg, authResponse.data!.username, authResponse.data!.user_id);
++    }
++  } catch (e) {
++    console.error("[cli-api] post-login user sync error:", e);
+   }
+ 
+   return authResponse;
+@@ -241,3 +253,76 @@ export async function loginWithCredentials(
+ export function clearJwksCache(): void {
+   _jwksCache = null;
+ }
++
++// ── OpenClaw CLI API ──────────────────────────────────────────────────────────
++
++/**
++ * Check whether the user already exists in the OpenClaw CLI gateway.
++ * POST /cli/users/exists  →  any truthy response means the user exists.
++ */
++export async function checkCliUserExists(
++  cfg: OAuthConfig,
++  username: string,
++  iamId: string,
++): Promise<boolean> {
++  if (!cfg.CLI_API_TOKEN) {
++    console.warn("[cli-api] OPENCLAW_CLI_API_TOKEN not set, skipping user-exists check");
++    return false;
++  }
++  try {
++    const url = `${cfg.CLI_API_HOST}/cli/users/exists`;
++    const response = await fetch(url, {
++      method: "POST",
++      headers: {
++        Authorization: `Bearer ${cfg.CLI_API_TOKEN}`,
++        "Content-Type": "application/json",
++      },
++      body: JSON.stringify({ username, iamId }),
++      signal: AbortSignal.timeout(cfg.REQUEST_TIMEOUT),
++    });
++    const data = (await response.json()) as Record<string, unknown>;
++    // { success: true, userId: "...", exists: true }
++    const exists = data["success"] === true && data["exists"] === true;
++    console.log("[cli-api] user exists:", exists, "username:", username);
++    return exists;
++  } catch (e) {
++    console.error("[cli-api] checkCliUserExists error:", e);
++    return false;
++  }
++}
++
++/**
++ * Initialize (create) the user in the OpenClaw CLI gateway.
++ * POST /cli/users/create
++ */
++export async function createCliUser(
++  cfg: OAuthConfig,
++  username: string,
++  iamId: string,
++): Promise<void> {
++  if (!cfg.CLI_API_TOKEN) {
++    console.warn("[cli-api] OPENCLAW_CLI_API_TOKEN not set, skipping user create");
++    return;
++  }
++  try {
++    const url = `${cfg.CLI_API_HOST}/cli/users/create`;
++    const response = await fetch(url, {
++      method: "POST",
++      headers: {
++        Authorization: `Bearer ${cfg.CLI_API_TOKEN}`,
++        "Content-Type": "application/json",
++      },
++      body: JSON.stringify({ username, iamId }),
++      signal: AbortSignal.timeout(cfg.REQUEST_TIMEOUT),
++    });
++    const data = (await response.json()) as Record<string, unknown>;
++    // { success: true, userId: "...", ... } or { success: false, error: "..." }
++    if (data["success"] !== true) {
++      console.error("[cli-api] createCliUser failed:", data["error"] ?? JSON.stringify(data));
++    } else {
++      console.log("[cli-api] user created:", username, "userId:", data["userId"]);
++    }
++  } catch (e) {
++    console.error("[cli-api] createCliUser error:", e);
++  }
++}
+-- 
+2.31.1
+
+
+From 064088b2b424fc8c6e64bb4e63c162e574827d44 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=E6=9B=B9=E9=93=AD=E5=93=B2?= <mingzhe.cao@unisco.com>
+Date: Sun, 8 Mar 2026 14:00:15 +0800
+Subject: [PATCH 6/7] =?UTF-8?q?=E6=9B=B4=E6=96=B0=E9=BB=98=E8=AE=A4?=
+ =?UTF-8?q?=E7=A7=98=E9=92=A5?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ ui/src/ui/oauth-user.ts     | 10 ++++++----
+ ui/src/ui/views/overview.ts | 10 +++-------
+ 2 files changed, 9 insertions(+), 11 deletions(-)
+
+diff --git a/ui/src/ui/oauth-user.ts b/ui/src/ui/oauth-user.ts
+index 1c108ba03..3281a217e 100644
+--- a/ui/src/ui/oauth-user.ts
++++ b/ui/src/ui/oauth-user.ts
+@@ -29,9 +29,11 @@ export function getOAuthUserId(): string | null {
+   return getOAuthUser()?.user_id ?? null;
+ }
+ 
+-/** Returns the locked session key for chat: agent:main:main:<userId>, or null if no OAuth user. */
++/** Returns the locked session key: <username>:<user_id>, or null if no OAuth user. */
+ export function getOAuthChatSessionKey(): string | null {
+-  const userId = getOAuthUserId();
+-  if (!userId) return null;
+-  return `agent:main:main:${userId}`;
++  const user = getOAuthUser();
++  if (!user?.user_id) return null;
++  const username = user.username?.trim();
++  if (!username) return null;
++  return `${username}-${user.user_id}`;
+ }
+diff --git a/ui/src/ui/views/overview.ts b/ui/src/ui/views/overview.ts
+index 882703c89..14944c2f0 100644
+--- a/ui/src/ui/views/overview.ts
++++ b/ui/src/ui/views/overview.ts
+@@ -4,7 +4,7 @@ import { t, i18n, type Locale } from "../../i18n/index.ts";
+ import { buildExternalLinkRel, EXTERNAL_LINK_TARGET } from "../external-link.ts";
+ import { formatRelativeTimestamp, formatDurationHuman } from "../format.ts";
+ import type { GatewayHelloOk } from "../gateway.ts";
+-import { getOAuthUserId } from "../oauth-user.ts";
++import { getOAuthChatSessionKey } from "../oauth-user.ts";
+ import { formatNextRun } from "../presenter.ts";
+ import type { UiSettings } from "../storage.ts";
+ import { shouldShowPairingHint } from "./overview-hints.ts";
+@@ -243,12 +243,8 @@ export function renderOverview(props: OverviewProps) {
+           <label class="field">
+             <span>${t("overview.access.sessionKey")}</span>
+             ${(() => {
+-              const userId = getOAuthUserId();
+-              if (userId) {
+-                // OAuth mode: show locked session key (base:userId), not editable
+-                const lockedKey = props.settings.sessionKey.endsWith(`:${userId}`)
+-                  ? props.settings.sessionKey
+-                  : `${props.settings.sessionKey}:${userId}`;
++              const lockedKey = getOAuthChatSessionKey();
++              if (lockedKey) {
+                 return html`<input .value=${lockedKey} readonly />`;
+               }
+               return html`<input
+-- 
+2.31.1
+
+
+From 1946d25b5d3b019a5bc631b34d52294513d83b14 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=E6=9B=B9=E9=93=AD=E5=93=B2?= <mingzhe.cao@unisco.com>
+Date: Sun, 8 Mar 2026 21:02:26 +0800
+Subject: [PATCH 7/7] up setting
+
+---
+ ui/src/ui/oauth-user.ts | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/ui/src/ui/oauth-user.ts b/ui/src/ui/oauth-user.ts
+index 3281a217e..ebe77a015 100644
+--- a/ui/src/ui/oauth-user.ts
++++ b/ui/src/ui/oauth-user.ts
+@@ -29,11 +29,11 @@ export function getOAuthUserId(): string | null {
+   return getOAuthUser()?.user_id ?? null;
+ }
+ 
+-/** Returns the locked session key: <username>:<user_id>, or null if no OAuth user. */
++/** Returns the locked session key: agent:<username>-<user_id>:main, or null if no OAuth user. */
+ export function getOAuthChatSessionKey(): string | null {
+   const user = getOAuthUser();
+   if (!user?.user_id) return null;
+   const username = user.username?.trim();
+   if (!username) return null;
+-  return `${username}-${user.user_id}`;
++  return `agent:${username}-${user.user_id}:main`;
+ }
+-- 
+2.31.1
+

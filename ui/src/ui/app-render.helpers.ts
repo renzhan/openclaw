@@ -13,7 +13,6 @@ import {
   normalizeChatModelOverrideValue,
   resolveServerChatModelValue,
 } from "./chat-model-ref.ts";
-import { getOAuthChatSessionKey } from "./oauth-user.ts";
 import { ChatState, loadChatHistory } from "./controllers/chat.ts";
 import { loadSessions } from "./controllers/sessions.ts";
 import { icons } from "./icons.ts";
@@ -138,13 +137,10 @@ function renderCronFilterIcon(hiddenCount: number) {
 export function renderChatSessionSelect(state: AppViewState) {
   const sessionGroups = resolveSessionOptionGroups(state, state.sessionKey, state.sessionsResult);
   const modelSelect = renderChatModelSelect(state);
-  const oauthSessionKey = getOAuthChatSessionKey();
   return html`
     <div class="chat-controls__session-row">
       <label class="field chat-controls__session">
-        ${oauthSessionKey
-          ? html`<span class="chat-controls__session-key">${oauthSessionKey}</span>`
-          : html`<select
+        <select
           .value=${state.sessionKey}
           ?disabled=${!state.connected || sessionGroups.length === 0}
           @change=${(e: Event) => {
@@ -170,7 +166,7 @@ export function renderChatSessionSelect(state: AppViewState) {
                 )}
               </optgroup>`,
           )}
-        </select>`}
+        </select>
       </label>
       ${modelSelect}
     </div>
@@ -238,6 +234,53 @@ export function renderChatControls(state: AppViewState) {
   `;
   return html`
     <div class="chat-controls">
+<<<<<<< HEAD
+=======
+      <label class="field chat-controls__session">
+        ${(() => {
+          const oauthSessionKey = getOAuthChatSessionKey();
+          if (oauthSessionKey) {
+            // OAuth mode: show locked session key as read-only text, no select
+            return html`<span class="chat-controls__session-key">${oauthSessionKey}</span>`;
+          }
+          return html`<select
+            .value=${state.sessionKey}
+            ?disabled=${!state.connected}
+            @change=${(e: Event) => {
+              const next = (e.target as HTMLSelectElement).value;
+              state.sessionKey = next;
+              state.chatMessage = "";
+              state.chatStream = null;
+              (state as unknown as OpenClawApp).chatStreamStartedAt = null;
+              state.chatRunId = null;
+              (state as unknown as OpenClawApp).resetToolStream();
+              (state as unknown as OpenClawApp).resetChatScroll();
+              state.applySettings({
+                ...state.settings,
+                sessionKey: next,
+                lastActiveSessionKey: next,
+              });
+              void state.loadAssistantIdentity();
+              syncUrlWithSessionKey(
+                state as unknown as Parameters<typeof syncUrlWithSessionKey>[0],
+                next,
+                true,
+              );
+              void loadChatHistory(state as unknown as ChatState);
+            }}
+          >
+            ${repeat(
+              sessionOptions,
+              (entry) => entry.key,
+              (entry) =>
+                html`<option value=${entry.key} title=${entry.key}>
+                  ${entry.displayName ?? entry.key}
+                </option>`,
+            )}
+          </select>`;
+        })()}
+      </label>
+>>>>>>> iam-v2026.2.26
       <button
         class="btn btn--sm btn--icon"
         ?disabled=${state.chatLoading || !state.connected}
