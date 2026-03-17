@@ -845,7 +845,6 @@ export function createGatewayHttpServer(opts: {
         name: "oauth-session-gate",
         run: () => enforceOAuthSession(req, res),
       });
-      }
       if (canvasHost) {
         requestStages.push({
           name: "canvas-auth",
