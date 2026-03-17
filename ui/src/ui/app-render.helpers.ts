@@ -13,10 +13,12 @@ import {
   normalizeChatModelOverrideValue,
   resolveServerChatModelValue,
 } from "./chat-model-ref.ts";
+import { getOAuthChatSessionKey } from "./oauth-user.ts";
 import { ChatState, loadChatHistory } from "./controllers/chat.ts";
 import { loadSessions } from "./controllers/sessions.ts";
 import { icons } from "./icons.ts";
 import { iconForTab, pathForTab, titleForTab, type Tab } from "./navigation.ts";
+import { getOAuthChatSessionKey } from "./oauth-user.ts";
 import type { ThemeTransitionContext } from "./theme-transition.ts";
 import type { ThemeMode, ThemeName } from "./theme.ts";
 import type { ModelCatalogEntry, SessionsListResult } from "./types.ts";
@@ -77,7 +79,7 @@ export function renderTab(state: AppViewState, tab: Tab, opts?: { collapsed?: bo
         }
         event.preventDefault();
         if (tab === "chat") {
-          const mainSessionKey = resolveSidebarChatSessionKey(state);
+          const mainSessionKey = getOAuthChatSessionKey() ?? resolveSidebarChatSessionKey(state);
           if (state.sessionKey !== mainSessionKey) {
             resetChatStateForSessionSwitch(state, mainSessionKey);
             void state.loadAssistantIdentity();
@@ -136,10 +138,13 @@ function renderCronFilterIcon(hiddenCount: number) {
 export function renderChatSessionSelect(state: AppViewState) {
   const sessionGroups = resolveSessionOptionGroups(state, state.sessionKey, state.sessionsResult);
   const modelSelect = renderChatModelSelect(state);
+  const oauthSessionKey = getOAuthChatSessionKey();
   return html`
     <div class="chat-controls__session-row">
       <label class="field chat-controls__session">
-        <select
+        ${oauthSessionKey
+          ? html`<span class="chat-controls__session-key">${oauthSessionKey}</span>`
+          : html`<select
           .value=${state.sessionKey}
           ?disabled=${!state.connected || sessionGroups.length === 0}
           @change=${(e: Event) => {
@@ -165,7 +170,7 @@ export function renderChatSessionSelect(state: AppViewState) {
                 )}
               </optgroup>`,
           )}
-        </select>
+        </select>`}
       </label>
       ${modelSelect}
     </div>

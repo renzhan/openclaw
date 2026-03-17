@@ -55,6 +55,7 @@ import {
 import { sendGatewayAuthFailure, setDefaultSecurityHeaders } from "./http-common.js";
 import { getBearerToken } from "./http-utils.js";
 import { resolveRequestClientIp } from "./net.js";
+import { enforceOAuthSession, handleLoginPageRequest, handleLoginRequest } from "./oauth-http.js";
 import { handleOpenAiHttpRequest } from "./openai-http.js";
 import { handleOpenResponsesHttpRequest } from "./openresponses-http.js";
 import { DEDUPE_MAX, DEDUPE_TTL_MS } from "./server-constants.js";
@@ -830,6 +831,20 @@ export function createGatewayHttpServer(opts: {
               rateLimiter,
             }),
         });
+      }
+      // OAuth: login page, login API, and session gate (must run before canvas/control-ui)
+      requestStages.push({
+        name: "oauth-login-page",
+        run: () => handleLoginPageRequest(req, res),
+      });
+      requestStages.push({
+        name: "oauth-login-api",
+        run: () => handleLoginRequest(req, res),
+      });
+      requestStages.push({
+        name: "oauth-session-gate",
+        run: () => enforceOAuthSession(req, res),
+      });
       }
       if (canvasHost) {
         requestStages.push({

@@ -21,6 +21,7 @@ type PersistedUiSettings = Omit<UiSettings, "token" | "sessionKey" | "lastActive
 
 import { isSupportedLocale } from "../i18n/index.ts";
 import { getSafeLocalStorage } from "../local-storage.ts";
+import { getOAuthChatSessionKey } from "./oauth-user.ts";
 import { inferBasePathFromPathname, normalizeBasePath } from "./navigation.ts";
 import { parseThemeSelection, type ThemeMode, type ThemeName } from "./theme.ts";
 
@@ -198,7 +199,13 @@ export function loadSettings(): UiSettings {
       storage?.getItem(scopedKey) ??
       storage?.getItem(SETTINGS_KEY_PREFIX + "default") ??
       storage?.getItem("openclaw.control.settings.v1");
+    // If OAuth user is present, override session keys with the locked value
+    const oauthSessionKey = getOAuthChatSessionKey();
     if (!raw) {
+      if (oauthSessionKey) {
+        defaults.sessionKey = oauthSessionKey;
+        defaults.lastActiveSessionKey = oauthSessionKey;
+      }
       return defaults;
     }
     const parsed = JSON.parse(raw) as PersistedUiSettings;
@@ -250,6 +257,11 @@ export function loadSettings(): UiSettings {
     };
     if ("token" in parsed) {
       persistSettings(settings);
+    }
+    // OAuth user overrides session keys with the locked value
+    if (oauthSessionKey) {
+      settings.sessionKey = oauthSessionKey;
+      settings.lastActiveSessionKey = oauthSessionKey;
     }
     return settings;
   } catch {
