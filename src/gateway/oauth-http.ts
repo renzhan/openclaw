@@ -1,14 +1,22 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { sendJson, sendMethodNotAllowed } from "./http-common.js";
 import { resolveOAuthConfig } from "./oauth-config.js";
 import { loginWithCredentials } from "./oauth-service.js";
 import { createOAuthSession, resolveOAuthSession, setSessionCookie } from "./oauth-session.js";
-import { sendJson, sendMethodNotAllowed } from "./http-common.js";
 
 const LOGIN_PATH = "/api/v1/auth/login";
 const LOGIN_PAGE_PATH = "/login";
 
 // Paths that never require an OAuth session
-const EXEMPT_PREFIXES = [LOGIN_PATH, LOGIN_PAGE_PATH, "/assets/", "/favicon", "/_", "/wecom/"];
+const EXEMPT_PREFIXES = [
+  LOGIN_PATH,
+  LOGIN_PAGE_PATH,
+  "/assets/",
+  "/favicon",
+  "/_",
+  "/wecom/",
+  "/api/messages",
+];
 
 // ── Session gate ──────────────────────────────────────────────────────────────
 
@@ -18,15 +26,21 @@ const EXEMPT_PREFIXES = [LOGIN_PATH, LOGIN_PAGE_PATH, "/assets/", "/favicon", "/
  */
 export function enforceOAuthSession(req: IncomingMessage, res: ServerResponse): boolean {
   const cfg = resolveOAuthConfig();
-  if (!cfg) return false;
+  if (!cfg) {
+    return false;
+  }
 
   const url = new URL(req.url ?? "/", "http://localhost");
   const pathname = url.pathname;
 
-  if (EXEMPT_PREFIXES.some((p) => pathname === p || pathname.startsWith(p))) return false;
+  if (EXEMPT_PREFIXES.some((p) => pathname === p || pathname.startsWith(p))) {
+    return false;
+  }
 
   const user = resolveOAuthSession(req);
-  if (user) return false;
+  if (user) {
+    return false;
+  }
 
   const isBrowser = req.method === "GET" || req.method === "HEAD";
   if (!isBrowser) {
@@ -47,7 +61,9 @@ export function enforceOAuthSession(req: IncomingMessage, res: ServerResponse): 
 
 export function handleLoginPageRequest(req: IncomingMessage, res: ServerResponse): boolean {
   const url = new URL(req.url ?? "/", "http://localhost");
-  if (url.pathname !== LOGIN_PAGE_PATH) return false;
+  if (url.pathname !== LOGIN_PAGE_PATH) {
+    return false;
+  }
 
   if (req.method !== "GET" && req.method !== "HEAD") {
     sendMethodNotAllowed(res, "GET");
@@ -75,7 +91,9 @@ export async function handleLoginRequest(
   res: ServerResponse,
 ): Promise<boolean> {
   const url = new URL(req.url ?? "/", "http://localhost");
-  if (url.pathname !== LOGIN_PATH) return false;
+  if (url.pathname !== LOGIN_PATH) {
+    return false;
+  }
 
   if (req.method !== "POST") {
     sendMethodNotAllowed(res, "POST");
@@ -122,7 +140,9 @@ export async function handleLoginRequest(
 
 function isSecureRequest(req: IncomingMessage): boolean {
   const proto = req.headers["x-forwarded-proto"];
-  if (typeof proto === "string") return proto.toLowerCase() === "https";
+  if (typeof proto === "string") {
+    return proto.toLowerCase() === "https";
+  }
   return (req.socket as { encrypted?: boolean }).encrypted === true;
 }
 
